@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raspberry Pi - WebRTC Receiver</title>
+</head>
+<body>
+    <h2>Raspberry Pi WebRTC Stream Receiver</h2>
+    <video id="remoteVideo" autoplay playsinline controls></video>
+
+    <script>
+        const video = document.getElementById('remoteVideo');
+        const peer = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        // Handle incoming media streams
+        peer.ontrack = function(event) {
+            if (video.srcObject !== event.streams[0]) {
+                video.srcObject = event.streams[0]; // Display the received stream in the video element
+                console.log('Remote stream added.');
+            }
+        };
+
+        // Setup WebSocket connection
+        const ws = new WebSocket('ws://ws-server:8080'); // Replace ws-server with your ws-server
+
+        ws.onopen = function() {
+            console.log('Connected to WebSocket server.');
+        };
+
+        ws.onmessage = function(event) {
+            console.log('Raw message received:', event.data);
+            if (event.data instanceof Blob) {
+                // Blob data received, handle as binary
+                var reader = new FileReader();
+                reader.readAsText(event.data);
+                reader.onload = function() {
+                    console.log('Received Blob message converted to text:', reader.result);
+                    processMessage(reader.result);
+                };
+                reader.onerror = function(error) {
+                    console.error('Error reading blob:', error);
+                };
+            } else {
+                // Assuming text data received
+                console.log('Received text message:', event.data);
+                processMessage(event.data);
+            }
+        };
+
+        function processMessage(data) {
+            try {
+                const parsedData = JSON.parse(data);
+                console.log('Parsed message:', parsedData);
+                if (parsedData.type === 'offer') {
+                    console.log('Offer received:', parsedData);
+                    peer.setRemoteDescription(new RTCSessionDescription(parsedData.data))
+                        .then(() => {
+                            console.log('Remote description set. Creating answer.');
+                            return peer.createAnswer();
+                        })
+                        .then(answer => {
+                            console.log('Answer created:', answer);
+                            return peer.setLocalDescription(answer);
+                        })
+                        .then(() => {
+                            ws.send(JSON.stringify({ type: 'answer', data: peer.localDescription.toJSON() }));
+                            console.log('Answer sent back to sender.');
+                        })
+                        .catch(error => console.error('Error during offer-answer process', error));
+                } else if (parsedData.type === 'candidate') {
+                    console.log('ICE candidate received:', parsedData);
+                    peer.addIceCandidate(new RTCIceCandidate(parsedData.data))
+                        .catch(error => console.error('Error adding received ICE candidate', error));
+                }
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        }
+
+        ws.onerror = function(error) {
+            console.error('WebSocket error:', error);
+        };
+
+        ws.onclose = function() {
+            console.log('WebSocket connection closed.');
+        };
+
+        peer.onicecandidate = function(event) {
+            if (event.candidate) {
+                console.log('Sending ICE candidate');
+                ws.send(JSON.stringify({ type: 'candidate', data: event.candidate.toJSON() }));
+            }
+        };
+
+        peer.oniceconnectionstatechange = function() {
+            console.log('ICE Connection State Change:', peer.iceConnectionState);
+        };
+
+        peer.onsignalingstatechange = function() {
+            console.log('Signaling State Change:', peer.signalingState);
+        };
+
+        peer.onconnectionstatechange = function() {
+            console.log('Connection State Change:', peer.connectionState);
+            if (peer.connectionState === 'connected') {
+                console.log('Peer connection fully established.');
+            }
+        };
+
+        // Added console log to verify video.srcObject
+        console.log('Video srcObject:', video.srcObject);
+    </script>
+</body>
+</html>
