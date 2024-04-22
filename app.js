@@ -79,7 +79,7 @@ peer.onsignalingstatechange = () => {
 // Function to start screen sharing
 function startScreenSharing() {
     console.log('Attempting to start screen sharing...');
-    navigator.mediaDevices.getDisplayMedia({ video: true })
+    navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
         .then(stream => {
             console.log('Screen sharing started.');
             video.srcObject = stream;
