@@ -10,9 +10,12 @@ ws.onopen = () => {
 };
 
 ws.onmessage = function(event) {
+    console.log('WebSocket message received:', event.data);
     if (event.data instanceof Blob) {
-        const reader = new FileReader();
+        // If the data is a Blob, we need to convert it to text before processing
+        var reader = new FileReader();
         reader.onload = function() {
+            console.log('Received Blob message converted to text:', reader.result);
             try {
                 const jsonData = JSON.parse(reader.result);
                 handleJsonData(jsonData);
@@ -25,6 +28,7 @@ ws.onmessage = function(event) {
         };
         reader.readAsText(event.data);
     } else {
+        // If the data is not a Blob, assume it is a JSON string
         try {
             const jsonData = JSON.parse(event.data);
             handleJsonData(jsonData);
@@ -36,23 +40,25 @@ ws.onmessage = function(event) {
 
 function handleJsonData(jsonData) {
     console.log('Processing received data:', jsonData);
-    if (jsonData.type === 'answer') {
-        console.log('Received answer:', jsonData);
-        peer.setRemoteDescription(new RTCSessionDescription(jsonData.data))
-            .then(() => console.log('Remote description successfully set.'))
-            .catch(error => console.error('Failed to set remote description', error));
-    } else if (jsonData.type === 'candidate') {
-        console.log('Received ICE candidate:', jsonData);
-        peer.addIceCandidate(new RTCIceCandidate(jsonData.data))
-            .then(() => console.log('ICE candidate successfully added.'))
-            .catch(error => console.error('Failed to add ICE candidate', error));
+    switch (jsonData.type) {
+        case 'answer':
+            peer.setRemoteDescription(new RTCSessionDescription(jsonData.data))
+                .then(() => console.log('Remote description successfully set.'))
+                .catch(error => console.error('Failed to set remote description:', error));
+            break;
+        case 'candidate':
+            peer.addIceCandidate(new RTCIceCandidate(jsonData.data))
+                .then(() => console.log('ICE candidate successfully added.'))
+                .catch(error => console.error('Failed to add ICE candidate:', error));
+            break;
     }
 }
 
 peer.onicecandidate = event => {
+    console.log('ICE candidate event:', event);
     if (event.candidate) {
-        console.log('Found ICE candidate:', event.candidate);
         ws.send(JSON.stringify({ type: 'candidate', data: event.candidate.toJSON() }));
+        console.log('ICE candidate sent:', event.candidate);
     } else {
         console.log('No more ICE candidates will be found.');
     }
@@ -60,38 +66,37 @@ peer.onicecandidate = event => {
 
 peer.oniceconnectionstatechange = () => {
     console.log('ICE Connection State Change:', peer.iceConnectionState);
-    if (peer.iceConnectionState === 'failed') {
-        console.error('ICE Connection has failed.');
-    }
 };
 
 peer.onconnectionstatechange = () => {
     console.log('Connection State Change:', peer.connectionState);
-    if (peer.connectionState === 'connected') {
-        console.log('Peer connection fully established.');
-    }
 };
 
 peer.onsignalingstatechange = () => {
     console.log('Signaling State Change:', peer.signalingState);
 };
 
-// Function to start screen sharing
 function startScreenSharing() {
     console.log('Attempting to start screen sharing...');
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
         .then(stream => {
             console.log('Screen sharing started.');
             video.srcObject = stream;
-            stream.getTracks().forEach(track => peer.addTrack(track, stream));
+            stream.getTracks().forEach(track => {
+                peer.addTrack(track, stream);
+                track.onended = () => {
+                    console.log('Screen sharing stopped by the user.');
+                    ws.send(JSON.stringify({ type: 'info', data: 'Screen sharing stopped by the user.' }));
+                };
+            });
             createAndSendOffer();
         })
         .catch(error => {
-            console.error('Failed to get display media', error);
+            console.error('Failed to get display media:', error);
+            ws.send(JSON.stringify({ type: 'error', data: 'Failed to start screen sharing.' }));
         });
 }
 
-// Create and send an offer to the peer
 function createAndSendOffer() {
     console.log('Creating offer...');
     peer.createOffer()
@@ -105,12 +110,11 @@ function createAndSendOffer() {
             ws.send(offerData);
         })
         .catch(error => {
-            console.error('Error creating or sending offer', error);
+            console.error('Error creating or sending offer:', error);
         });
 }
 
-// Optionally, you can add UI buttons or other mechanisms to start screen sharing
 document.addEventListener('DOMContentLoaded', () => {
-    startScreenSharing();  // Or attach to a button click event
+    startScreenSharing();  // This can be attached to a button or automatically triggered
 });
 

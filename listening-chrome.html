@@ -10,46 +10,70 @@
     <video id="remoteVideo" autoplay playsinline controls></video>
 
     <script>
-        const video = document.getElementById('remoteVideo');
-        const peer = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        });
+        let peer = null;
+        let ws = null;
 
-        // Handle incoming media streams
-        peer.ontrack = function(event) {
-            if (video.srcObject !== event.streams[0]) {
-                video.srcObject = event.streams[0]; // Display the received stream in the video element
-                console.log('Remote stream added.');
-            }
-        };
+        // Initializes the RTCPeerConnection and sets up event handlers
+        function initializePeerConnection() {
+            peer = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
 
-        // Setup WebSocket connection
-        const ws = new WebSocket('ws://ws-server:8080'); // Replace ws-server with your ws-server
+            // Handles the tracks that come from the sender
+            peer.ontrack = function(event) {
+                const video = document.getElementById('remoteVideo');
+                if (video.srcObject !== event.streams[0]) {
+                    video.srcObject = event.streams[0];
+                    console.log('Remote stream added.');
+                }
+            };
 
-        ws.onopen = function() {
-            console.log('Connected to WebSocket server.');
-        };
+            // Sends any ICE candidates to the remote peer
+            peer.onicecandidate = function(event) {
+                if (event.candidate) {
+                    console.log('Sending ICE candidate');
+                    ws.send(JSON.stringify({ type: 'candidate', data: event.candidate.toJSON() }));
+                }
+            };
 
-        ws.onmessage = function(event) {
-            console.log('Raw message received:', event.data);
-            if (event.data instanceof Blob) {
-                // Blob data received, handle as binary
-                var reader = new FileReader();
-                reader.readAsText(event.data);
-                reader.onload = function() {
-                    console.log('Received Blob message converted to text:', reader.result);
-                    processMessage(reader.result);
-                };
-                reader.onerror = function(error) {
-                    console.error('Error reading blob:', error);
-                };
-            } else {
-                // Assuming text data received
-                console.log('Received text message:', event.data);
-                processMessage(event.data);
-            }
-        };
+            // Monitors connection state to restart if it fails
+            peer.oniceconnectionstatechange = function() {
+                console.log('ICE Connection State Change:', peer.iceConnectionState);
+                if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+                    console.log('Peer connection is disconnected or failed.');
+                    restartConnection();
+                }
+            };
+        }
 
+        // Initializes WebSocket connection and sets up event handlers
+        function initializeWebSocket() {
+            ws = new WebSocket('ws://ws-server:8080');
+            ws.onopen = function() {
+                console.log('Connected to WebSocket server.');
+            };
+
+            ws.onmessage = function(event) {
+                console.log('Message received:', event.data);
+                if (event.data instanceof Blob) {
+                    // Handle Blob data
+                    var reader = new FileReader();
+                    reader.onload = function() {
+                        console.log('Received Blob message converted to text:', reader.result);
+                        processMessage(reader.result);
+                    };
+                    reader.onerror = function(error) {
+                        console.error('Error reading blob:', error);
+                    };
+                    reader.readAsText(event.data);
+                } else {
+                    // Handle non-Blob data (assuming it's already in JSON string format)
+                    processMessage(event.data);
+                }
+            };
+        }
+
+        // Processes incoming messages from the WebSocket
         function processMessage(data) {
             try {
                 const parsedData = JSON.parse(data);
@@ -80,38 +104,26 @@
             }
         }
 
-        ws.onerror = function(error) {
-            console.error('WebSocket error:', error);
-        };
-
-        ws.onclose = function() {
-            console.log('WebSocket connection closed.');
-        };
-
-        peer.onicecandidate = function(event) {
-            if (event.candidate) {
-                console.log('Sending ICE candidate');
-                ws.send(JSON.stringify({ type: 'candidate', data: event.candidate.toJSON() }));
+        // Resets and reinitializes the WebRTC and WebSocket connections
+        function restartConnection() {
+            if (peer) {
+                peer.close();
+                peer = null;
             }
-        };
-
-        peer.oniceconnectionstatechange = function() {
-            console.log('ICE Connection State Change:', peer.iceConnectionState);
-        };
-
-        peer.onsignalingstatechange = function() {
-            console.log('Signaling State Change:', peer.signalingState);
-        };
-
-        peer.onconnectionstatechange = function() {
-            console.log('Connection State Change:', peer.connectionState);
-            if (peer.connectionState === 'connected') {
-                console.log('Peer connection fully established.');
+            if (ws) {
+                ws.close();
+                ws = null;
             }
-        };
+            initializePeerConnection();
+            initializeWebSocket();
+        }
 
-        // Added console log to verify video.srcObject
-        console.log('Video srcObject:', video.srcObject);
+        // Start the WebRTC and WebSocket when the page is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            initializePeerConnection();
+            initializeWebSocket();
+        });
     </script>
 </body>
 </html>
+
