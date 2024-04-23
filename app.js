@@ -9,55 +9,45 @@ document.addEventListener('DOMContentLoaded', function() {
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
-    let ws;
-    let timeoutHandle;  // Define a variable to store the timeout handle
+    let ws = new WebSocket('ws://ws-server:8080');
 
-    function initializeWebSocket() {
-        console.log('Attempting to establish WebSocket connection...');
-        ws = new WebSocket('ws://ws-server:8080');
+    ws.onopen = () => {
+        console.log('WebSocket connection established.');
+        updateStatus('Connected', 'green');
+        startButton.disabled = false;
+    };
 
-        ws.onopen = () => {
-            console.log('WebSocket connection established.');
-            clearTimeout(timeoutHandle);  // Clear the timeout on successful connection
-            updateStatus('Connected', 'green');
-            startButton.disabled = false;
-        };
+    ws.onerror = (event) => {
+        console.error('WebSocket Error:', event);
+        updateStatus('Connection Error', 'red');
+    };
 
-        ws.onerror = error => {
-            console.error('WebSocket error:', error);
-            updateStatus('WebSocket Error', 'red');
-        };
+    ws.onclose = () => {
+        console.log('WebSocket connection closed.');
+        updateStatus('Disconnected', 'red');
+        startButton.disabled = true;
+        stopButton.disabled = true;
+    };
 
-        ws.onclose = () => {
-            console.log('WebSocket connection closed.');
-            updateStatus('Disconnected', 'red');
-            startButton.disabled = true;
-            stopButton.disabled = true;
-        };
-
-        // Setup a timeout to check connection status
-        timeoutHandle = setTimeout(() => {
-            if (ws.readyState !== WebSocket.OPEN) {
-                console.error('Connection attempt timed out.');
-                updateStatus('Connection Timed Out', 'orange');
-                // Delay closing the WebSocket and updating the status to 'Disconnected'
-                setTimeout(() => {
-                    if (ws.readyState !== WebSocket.CLOSED) {
-                        ws.close();  // Close the socket after showing the timeout message
-                    }
-                    // Update to 'Disconnected' only if the socket is not already closed
-                    if (ws.readyState === WebSocket.CLOSED) {
-                        updateStatus('Disconnected', 'red');
-                    }
-                }, 3000);  // 3 seconds delay before executing the close and final status update
-            }
-        }, 10000);  // 10 seconds timeout to initially detect the failure
-    }
-
-    function updateStatus(text, color) {
-        connectionStatus.textContent = `● ${text}`;
-        connectionStatus.style.color = color;
-    }
+    ws.onmessage = function(event) {
+        console.log('WebSocket message received:', event.data);
+        const message = JSON.parse(event.data);
+        if (message.type === 'answer') {
+            peer.setRemoteDescription(new RTCSessionDescription(message.data))
+                .then(() => console.log('Remote description successfully set.'))
+                .catch(error => {
+                    console.error('Failed to set remote description:', error);
+                    updateStatus('SDP Error', 'red');
+                });
+        } else if (message.type === 'candidate') {
+            peer.addIceCandidate(new RTCIceCandidate(message.data))
+                .then(() => console.log('ICE candidate successfully added.'))
+                .catch(error => {
+                    console.error('Failed to add ICE candidate:', error);
+                    updateStatus('ICE Error', 'red');
+                });
+        }
+    };
 
     peer.onicecandidate = event => {
         if (event.candidate) {
@@ -73,6 +63,12 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Stream added to local video.');
     };
 
+    function updateStatus(text, color) {
+        connectionStatus.textContent = `● ${text}`;
+        connectionStatus.style.color = color;
+    }
+
+    // Event listeners for buttons
     startButton.addEventListener('click', () => {
         startScreenSharing();
         startButton.disabled = true;
@@ -88,14 +84,26 @@ document.addEventListener('DOMContentLoaded', function() {
     function startScreenSharing() {
         navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
             .then(stream => {
+                console.log('Display media obtained:', stream);
                 video.srcObject = stream;
                 stream.getTracks().forEach(track => {
+                    console.log('Adding track:', track);
                     peer.addTrack(track, stream);
+                    track.onended = () => {
+                        console.log('Track ended:', track.kind);
+                        handleTrackEnd();
+                    };
                 });
                 return peer.createOffer();
             })
-            .then(offer => peer.setLocalDescription(offer))
-            .then(() => ws.send(JSON.stringify({ type: 'offer', data: peer.localDescription })))
+            .then(offer => {
+                console.log('Offer created:', offer);
+                return peer.setLocalDescription(offer);
+            })
+            .then(() => {
+                console.log('Sending offer:', peer.localDescription);
+                ws.send(JSON.stringify({ type: 'offer', data: peer.localDescription }));
+            })
             .catch(error => {
                 console.error('Error during screen sharing setup:', error);
                 updateStatus('Setup Error', 'red');
@@ -105,12 +113,16 @@ document.addEventListener('DOMContentLoaded', function() {
     function stopScreenSharing() {
         if (video.srcObject) {
             video.srcObject.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
         }
-        ws.send(JSON.stringify({ type: 'stream-stopped' }));
-        updateStatus('Stopped', 'red');
+        console.log('Screen sharing stopped.');
+        ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
     }
 
-    initializeWebSocket();
+    function handleTrackEnd() {
+        console.log('Handling track end: Updating UI and signaling state change.');
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('stopButton').disabled = true;
+        stopScreenSharing();
+    }
 });
 
