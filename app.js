@@ -37,7 +37,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Stream added to local video.');
     };
 
-
     function startScreenSharing() {
         navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
             .then(stream => {
@@ -45,11 +44,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 video.srcObject = stream;
                 stream.getTracks().forEach(track => {
                     console.log('Adding track:', track);
+                    peer.addTrack(track, stream);
+
+                    // Handling the end of the track, which can indicate the user stopped sharing through the browser UI
                     track.onended = () => {
                         console.log('Track ended:', track.kind);
-                        stopScreenSharing(); // Call stop function when the track ends
+                        handleTrackEnd();
                     };
-                    peer.addTrack(track, stream);
                 });
                 return peer.createOffer();
             })
@@ -64,14 +65,34 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => console.error('Error during screen sharing setup:', error));
     }
 
-
     function stopScreenSharing() {
-        video.srcObject.getTracks().forEach(track => track.stop());
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+        }
         console.log('Screen sharing stopped.');
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
     }
 
-    // Automatically start sharing when the page is ready
-    startScreenSharing();
+    function handleTrackEnd() {
+        console.log('Handling track end: Updating UI and signaling state change.');
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('stopButton').disabled = true;
+        stopScreenSharing(); // Ensures additional cleanup and state updates
+    }
+
+    const startButton = document.getElementById('startButton');
+    const stopButton = document.getElementById('stopButton');
+
+    startButton.addEventListener('click', () => {
+        startScreenSharing();
+        startButton.disabled = true;
+        stopButton.disabled = false;
+    });
+
+    stopButton.addEventListener('click', () => {
+        stopScreenSharing();
+        startButton.disabled = false;
+        stopButton.disabled = true;
+    });
 });
 
