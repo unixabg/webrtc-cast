@@ -5,38 +5,80 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Receiver</title>
     <style>
-        body { font-family: Arial, sans-serif; }
-        #remoteVideo { width: 100%; height: auto; }
-        #status { color: #666; margin-top: 20px; }
+        body, html { margin: 0; height: 100%; overflow: hidden; }
+        #videoContainer {
+            position: relative;
+            height: 100%;
+        }
+        #remoteVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensures the video covers the full area of the element */
+        }
+        #statusOverlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background-color: rgba(0,0,0,0.5); /* Semi-transparent background for better visibility */
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 1em;
+        }
     </style>
 </head>
 <body>
-    <video id="remoteVideo" autoplay playsinline controls muted></video>
-    <p id="status">Status: Waiting for stream...</p>
+    <div id="videoContainer">
+        <video id="remoteVideo" autoplay playsinline controls muted></video>
+        <div id="statusOverlay">Status: Waiting for stream...</div>
+    </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            const remoteVideo = document.getElementById('remoteVideo');
+            const statusOverlay = document.getElementById('statusOverlay');
+            // Initialize knownTracks as a set to track the IDs of received tracks
+            const knownTracks = new Set();
+
+            function updateStatus(message) {
+                statusOverlay.textContent = `Status: ${message}`;
+            }
+
             const ws = new WebSocket('ws://ws-server:8080');
             const peer = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
             });
-            const video = document.getElementById('remoteVideo');
+
+            let isPlaying = false; // Flag to manage play state
+
 
             peer.ontrack = event => {
-                if (video.srcObject !== event.streams[0]) {
-                    video.srcObject = event.streams[0];
-                    console.log('New stream received.');
-                    video.play()
-                        .then(() => {
-                            console.log('Video playback started automatically while muted.');
-                            video.muted = false; // Unmute after successful autoplay
-                            document.getElementById('status').textContent = 'Status: Stream active';
-                        })
-                        .catch(error => {
-                            console.error('Failed to start video playback automatically:', error);
-                            document.getElementById('status').textContent = 'Status: Auto-play failed; please click to play';
-                            video.onclick = () => video.play(); // Allow manual play if autoplay fails
-                        });
+                console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
+                if (!knownTracks.has(event.track.id)) {
+                    knownTracks.add(event.track.id);
+                    console.log('Adding new track ID to known tracks.');
+                } else {
+                    console.log('Track ID already known, skipping setting stream.');
+                    return; // Skip setting the stream if this track ID has been processed
+                }
+
+                if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== event.streams[0].id) {
+                    remoteVideo.srcObject = event.streams[0];
+                    console.log('New stream set, stream ID:', event.streams[0].id);
+                    isPlaying = false;
+                }
+
+                if (!isPlaying) {
+                    setTimeout(() => {
+                        isPlaying = true;
+                        remoteVideo.play()
+                            .then(() => console.log('Playback started for stream ID:', event.streams[0].id))
+                            .catch(error => {
+                                console.error('Failed to start playback:', error);
+                                updateStatus('Auto-play failed; please click to play.');
+                                remoteVideo.onclick = () => remoteVideo.play();
+                            });
+                    }, 100);
                 }
             };
 
@@ -44,10 +86,19 @@
                 console.log('ICE connection state change:', peer.iceConnectionState);
                 if (['disconnected', 'failed', 'closed'].includes(peer.iceConnectionState)) {
                     console.log('ICE connection state is disconnected, failed, or closed.');
-                    document.getElementById('status').textContent = 'Status: Connection failed or disconnected';
+                    knownTracks.clear(); // Reset known tracks when connection is lost
+                    isPlaying = false; // Also reset the playback state to ensure consistency
+                    updateStatus('Connection failed or disconnected'); // Update UI to reflect the status
+
+                    // Optionally, handle reconnection logic here if applicable
+                    if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+                        // Implement logic to attempt to re-establish the connection
+                        console.log('Attempting to re-establish connection...');
+                    }
+                } else if (peer.iceConnectionState === 'connected') {
+                    updateStatus('Connection established'); // Provide feedback when connection is stable
                 }
             };
-
 
             ws.onmessage = event => {
                 const message = JSON.parse(event.data);
@@ -55,7 +106,11 @@
                 switch (message.type) {
                     case 'stream-stopped':
                         console.log('Stream stopped by the client.');
-                        document.getElementById('status').textContent = 'Stream was stopped by client. Waiting for new stream...';
+                        updateStatus('Stream stopped by client. Waiting for new stream...');
+                        isPlaying = false; // Reset play state
+                        setTimeout(() => {
+                            updateStatus('Listening for stream...');
+                        }, 3000);
                         break;
                     case 'offer':
                         console.log('Offer received, setting remote description.');
@@ -73,28 +128,20 @@
                         peer.addIceCandidate(new RTCIceCandidate(message.data))
                             .catch(error => console.error('Failed to add ICE candidate:', error));
                         break;
-                    case 'stream-stopped':
-                        console.log('Stream stopped by the client.');
-                        document.getElementById('status').textContent = 'Stream was stopped by client.';
-                        // Display the message for a few seconds before switching to listening status
-                        setTimeout(() => {
-                            document.getElementById('status').textContent = 'Listening for stream...';
-                        }, 3000); // Adjust time as needed
-                        break;
                 }
             };
 
             ws.onopen = () => {
                 console.log('Connected to WebSocket server.');
-                document.getElementById('status').textContent = 'Connected to WebSocket server.';
+                updateStatus('Connected to WebSocket server.');
             };
             ws.onerror = error => {
                 console.error('WebSocket Error:', error);
-                document.getElementById('status').textContent = 'WebSocket Error';
+                updateStatus('WebSocket Error');
             };
             ws.onclose = () => {
                 console.log('WebSocket connection closed.');
-                document.getElementById('status').textContent = 'WebSocket disconnected';
+                updateStatus('WebSocket disconnected');
             };
         });
     </script>
