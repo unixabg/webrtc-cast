@@ -35,13 +35,8 @@ document.addEventListener('DOMContentLoaded', function() {
     peer.ontrack = event => {
         video.srcObject = event.streams[0];
         console.log('Stream added to local video.');
-        event.streams[0].getTracks().forEach(track => {
-            track.onended = () => {
-                console.log('Track ended:', track.kind);
-                ws.send(JSON.stringify({ type: 'stream-stopped', data: 'User has ended the screen sharing.' }));
-            };
-        });
     };
+
 
     function startScreenSharing() {
         navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
@@ -52,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('Adding track:', track);
                     track.onended = () => {
                         console.log('Track ended:', track.kind);
-                        ws.send(JSON.stringify({ type: 'stream-stopped', data: 'User has ended the screen sharing.' }));
+                        stopScreenSharing(); // Call stop function when the track ends
                     };
                     peer.addTrack(track, stream);
                 });
@@ -69,8 +64,14 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => console.error('Error during screen sharing setup:', error));
     }
 
+
+    function stopScreenSharing() {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        console.log('Screen sharing stopped.');
+        ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
+    }
+
     // Automatically start sharing when the page is ready
     startScreenSharing();
 });
-
 

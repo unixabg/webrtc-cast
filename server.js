@@ -48,6 +48,11 @@ function handleClientMessage(data, ws) {
             console.log('Candidate received, distributing to other clients.');
             distributeMessage(data, ws);
             break;
+        case 'stream-stopped':
+            console.log('Stream stopped message received:', data.data);
+            // Notify all clients that the stream has been stopped.
+            distributeMessage(data, ws);
+            break;
     }
 }
 

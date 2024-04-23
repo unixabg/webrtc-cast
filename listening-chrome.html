@@ -49,10 +49,15 @@
                 }
             };
 
+
             ws.onmessage = event => {
                 const message = JSON.parse(event.data);
                 console.log('Message received:', message.type);
                 switch (message.type) {
+                    case 'stream-stopped':
+                        console.log('Stream stopped by the client.');
+                        document.getElementById('status').textContent = 'Stream was stopped by client. Waiting for new stream...';
+                        break;
                     case 'offer':
                         console.log('Offer received, setting remote description.');
                         peer.setRemoteDescription(new RTCSessionDescription(message.data))
@@ -68,6 +73,14 @@
                         console.log('ICE candidate received, adding to peer connection.');
                         peer.addIceCandidate(new RTCIceCandidate(message.data))
                             .catch(error => console.error('Failed to add ICE candidate:', error));
+                        break;
+                    case 'stream-stopped':
+                        console.log('Stream stopped by the client.');
+                        document.getElementById('status').textContent = 'Stream was stopped by client.';
+                        // Display the message for a few seconds before switching to listening status
+                        setTimeout(() => {
+                            document.getElementById('status').textContent = 'Listening for stream...';
+                        }, 3000); // Adjust time as needed
                         break;
                 }
             };
