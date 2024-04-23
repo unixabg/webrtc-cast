@@ -3,125 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Raspberry Pi - WebRTC Receiver</title>
+    <title>WebRTC Receiver</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #remoteVideo { width: 100%; height: auto; }
+        #status { color: #666; margin-top: 20px; }
+    </style>
 </head>
 <body>
-    <h2>Raspberry Pi WebRTC Stream Receiver</h2>
-    <video id="remoteVideo" autoplay playsinline controls></video>
+    <h2>Receiving WebRTC Stream</h2>
+    <video id="remoteVideo" autoplay playsinline controls muted></video>
+    <p id="status">Status: Waiting for stream...</p>
 
     <script>
-        let peer = null;
-        let ws = null;
-
-        // Initializes the RTCPeerConnection and sets up event handlers
-        function initializePeerConnection() {
-            peer = new RTCPeerConnection({
+        document.addEventListener('DOMContentLoaded', function() {
+            const ws = new WebSocket('ws://ws-server:8080');
+            const peer = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
             });
+            const video = document.getElementById('remoteVideo');
 
-            // Handles the tracks that come from the sender
-            peer.ontrack = function(event) {
-                const video = document.getElementById('remoteVideo');
+            peer.ontrack = event => {
                 if (video.srcObject !== event.streams[0]) {
                     video.srcObject = event.streams[0];
-                    console.log('Remote stream added.');
+                    console.log('New stream received.');
+                    video.play()
+                        .then(() => {
+                            console.log('Video playback started automatically while muted.');
+                            video.muted = false; // Unmute after successful autoplay
+                            document.getElementById('status').textContent = 'Status: Stream active';
+                        })
+                        .catch(error => {
+                            console.error('Failed to start video playback automatically:', error);
+                            document.getElementById('status').textContent = 'Status: Auto-play failed; please click to play';
+                            video.onclick = () => video.play(); // Allow manual play if autoplay fails
+                        });
                 }
             };
 
-            // Sends any ICE candidates to the remote peer
-            peer.onicecandidate = function(event) {
-                if (event.candidate) {
-                    console.log('Sending ICE candidate');
-                    ws.send(JSON.stringify({ type: 'candidate', data: event.candidate.toJSON() }));
+            peer.oniceconnectionstatechange = () => {
+                console.log('ICE connection state change:', peer.iceConnectionState);
+                if (['disconnected', 'failed', 'closed'].includes(peer.iceConnectionState)) {
+                    console.log('ICE connection state is disconnected, failed, or closed.');
+                    document.getElementById('status').textContent = 'Status: Connection failed or disconnected';
                 }
             };
 
-            // Monitors connection state to restart if it fails
-            peer.oniceconnectionstatechange = function() {
-                console.log('ICE Connection State Change:', peer.iceConnectionState);
-                if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
-                    console.log('Peer connection is disconnected or failed.');
-                    restartConnection();
+            ws.onmessage = event => {
+                const message = JSON.parse(event.data);
+                console.log('Message received:', message.type);
+                switch (message.type) {
+                    case 'offer':
+                        console.log('Offer received, setting remote description.');
+                        peer.setRemoteDescription(new RTCSessionDescription(message.data))
+                            .then(() => peer.createAnswer())
+                            .then(answer => peer.setLocalDescription(answer))
+                            .then(() => {
+                                console.log('Local description set, sending answer.');
+                                ws.send(JSON.stringify({ type: 'answer', data: peer.localDescription }));
+                            })
+                            .catch(error => console.error('Error during SDP exchange:', error));
+                        break;
+                    case 'candidate':
+                        console.log('ICE candidate received, adding to peer connection.');
+                        peer.addIceCandidate(new RTCIceCandidate(message.data))
+                            .catch(error => console.error('Failed to add ICE candidate:', error));
+                        break;
                 }
             };
-        }
 
-        // Initializes WebSocket connection and sets up event handlers
-        function initializeWebSocket() {
-            ws = new WebSocket('ws://ws-server:8080');
-            ws.onopen = function() {
+            ws.onopen = () => {
                 console.log('Connected to WebSocket server.');
+                document.getElementById('status').textContent = 'Connected to WebSocket server.';
             };
-
-            ws.onmessage = function(event) {
-                console.log('Message received:', event.data);
-                if (event.data instanceof Blob) {
-                    // Handle Blob data
-                    var reader = new FileReader();
-                    reader.onload = function() {
-                        console.log('Received Blob message converted to text:', reader.result);
-                        processMessage(reader.result);
-                    };
-                    reader.onerror = function(error) {
-                        console.error('Error reading blob:', error);
-                    };
-                    reader.readAsText(event.data);
-                } else {
-                    // Handle non-Blob data (assuming it's already in JSON string format)
-                    processMessage(event.data);
-                }
+            ws.onerror = error => {
+                console.error('WebSocket Error:', error);
+                document.getElementById('status').textContent = 'WebSocket Error';
             };
-        }
-
-        // Processes incoming messages from the WebSocket
-        function processMessage(data) {
-            try {
-                const parsedData = JSON.parse(data);
-                console.log('Parsed message:', parsedData);
-                if (parsedData.type === 'offer') {
-                    console.log('Offer received:', parsedData);
-                    peer.setRemoteDescription(new RTCSessionDescription(parsedData.data))
-                        .then(() => {
-                            console.log('Remote description set. Creating answer.');
-                            return peer.createAnswer();
-                        })
-                        .then(answer => {
-                            console.log('Answer created:', answer);
-                            return peer.setLocalDescription(answer);
-                        })
-                        .then(() => {
-                            ws.send(JSON.stringify({ type: 'answer', data: peer.localDescription.toJSON() }));
-                            console.log('Answer sent back to sender.');
-                        })
-                        .catch(error => console.error('Error during offer-answer process', error));
-                } else if (parsedData.type === 'candidate') {
-                    console.log('ICE candidate received:', parsedData);
-                    peer.addIceCandidate(new RTCIceCandidate(parsedData.data))
-                        .catch(error => console.error('Error adding received ICE candidate', error));
-                }
-            } catch (error) {
-                console.error('Error parsing message:', error);
-            }
-        }
-
-        // Resets and reinitializes the WebRTC and WebSocket connections
-        function restartConnection() {
-            if (peer) {
-                peer.close();
-                peer = null;
-            }
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-            initializePeerConnection();
-            initializeWebSocket();
-        }
-
-        // Start the WebRTC and WebSocket when the page is loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            initializePeerConnection();
-            initializeWebSocket();
+            ws.onclose = () => {
+                console.log('WebSocket connection closed.');
+                document.getElementById('status').textContent = 'WebSocket disconnected';
+            };
         });
     </script>
 </body>
