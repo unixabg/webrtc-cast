@@ -81,17 +81,24 @@ document.addEventListener('DOMContentLoaded', function() {
         stopButton.disabled = true;
     });
 
+    function updateStreamingStatus(text, color) {
+        const streamingStatus = document.getElementById('streamingStatus');
+        streamingStatus.textContent = `● ${text}`;
+        streamingStatus.style.color = color;
+    }
     function startScreenSharing() {
         navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
             .then(stream => {
                 console.log('Display media obtained:', stream);
                 video.srcObject = stream;
+                updateStreamingStatus('Streaming active', 'green');  // Update streaming status when the stream is active
                 stream.getTracks().forEach(track => {
                     console.log('Adding track:', track);
                     peer.addTrack(track, stream);
                     track.onended = () => {
                         console.log('Track ended:', track.kind);
                         handleTrackEnd();
+                        updateStreamingStatus('Streaming stopped', 'red');  // Update streaming status when the track ends
                     };
                 });
                 return peer.createOffer();
@@ -107,12 +114,15 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => {
                 console.error('Error during screen sharing setup:', error);
                 updateStatus('Setup Error', 'red');
+                updateStreamingStatus('Streaming failed', 'red');  // Update streaming status if there is an error
             });
     }
+
 
     function stopScreenSharing() {
         if (video.srcObject) {
             video.srcObject.getTracks().forEach(track => track.stop());
+            updateStreamingStatus('Streaming stopped', 'red'); // Update streaming status
         }
         console.log('Screen sharing stopped.');
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
