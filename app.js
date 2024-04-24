@@ -29,25 +29,37 @@ document.addEventListener('DOMContentLoaded', function() {
         stopButton.disabled = true;
     };
 
+    let confirmationTimeout; // Declare the timeout variable globally
+    let streamPlayingConfirmed = false; // Flag to track confirmation
     ws.onmessage = function(event) {
         console.log('WebSocket message received:', event.data);
         const message = JSON.parse(event.data);
-        if (message.type === 'answer') {
-            peer.setRemoteDescription(new RTCSessionDescription(message.data))
-                .then(() => console.log('Remote description successfully set.'))
-                .catch(error => {
-                    console.error('Failed to set remote description:', error);
-                    updateStatus('SDP Error', 'red');
-                });
-        } else if (message.type === 'candidate') {
-            peer.addIceCandidate(new RTCIceCandidate(message.data))
-                .then(() => console.log('ICE candidate successfully added.'))
-                .catch(error => {
-                    console.error('Failed to add ICE candidate:', error);
-                    updateStatus('ICE Error', 'red');
-                });
+        switch (message.type) {
+            case 'stream-playing':
+                console.log('Confirmation received that stream is playing on the receiver side.');
+                updateStreamingStatus('Stream is playing', 'green');
+                streamPlayingConfirmed = true; // Set the confirmation flag to true
+                clearTimeout(confirmationTimeout); // Clear the timeout
+                break;
+            case 'answer':
+                peer.setRemoteDescription(new RTCSessionDescription(message.data))
+                    .then(() => console.log('Remote description successfully set.'))
+                    .catch(error => {
+                        console.error('Failed to set remote description:', error);
+                        updateStatus('SDP Error', 'red');
+                    });
+                break;
+            case 'candidate':
+                peer.addIceCandidate(new RTCIceCandidate(message.data))
+                    .then(() => console.log('ICE candidate successfully added.'))
+                    .catch(error => {
+                        console.error('Failed to add ICE candidate:', error);
+                        updateStatus('ICE Error', 'red');
+                    });
+                break;
         }
     };
+
 
     peer.onicecandidate = event => {
         if (event.candidate) {
@@ -86,19 +98,27 @@ document.addEventListener('DOMContentLoaded', function() {
         streamingStatus.textContent = `● ${text}`;
         streamingStatus.style.color = color;
     }
+
     function startScreenSharing() {
         navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
             .then(stream => {
                 console.log('Display media obtained:', stream);
                 video.srcObject = stream;
-                updateStreamingStatus('Streaming active', 'green');  // Update streaming status when the stream is active
+                // Start the timer as soon as the stream starts
+                const confirmationTimeout = setTimeout(() => {
+                    if (!streamPlayingConfirmed) {
+                        console.error('No confirmation for stream playing received.');
+                        handleTrackEnd(); // Stop the streaming
+                        updateStreamingStatus('No confirmation received, streaming stopped', 'red');
+                    }
+                }, 10000); // Timeout set for 10 seconds
+
                 stream.getTracks().forEach(track => {
                     console.log('Adding track:', track);
                     peer.addTrack(track, stream);
                     track.onended = () => {
                         console.log('Track ended:', track.kind);
                         handleTrackEnd();
-                        updateStreamingStatus('Streaming stopped', 'red');  // Update streaming status when the track ends
                     };
                 });
                 return peer.createOffer();
@@ -114,10 +134,9 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => {
                 console.error('Error during screen sharing setup:', error);
                 updateStatus('Setup Error', 'red');
-                updateStreamingStatus('Streaming failed', 'red');  // Update streaming status if there is an error
+                updateStreamingStatus('Streaming failed', 'red');
             });
     }
-
 
     function stopScreenSharing() {
         if (video.srcObject) {

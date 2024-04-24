@@ -53,6 +53,14 @@ function handleClientMessage(data, ws) {
             // Notify all clients that the stream has been stopped.
             distributeMessage(data, ws);
             break;
+        case 'stream-playing':
+            console.log('Stream-playing message received:', data.data);
+            // Send this message back to the sender or handle it as needed
+            distributeMessage(data, ws);
+            break;
+        default:
+            console.error('Unhandled message type:', data.type);
+            ws.send(JSON.stringify({ error: 'Unhandled message type' }));
     }
 }
 

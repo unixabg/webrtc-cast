@@ -67,19 +67,22 @@
                     console.log('New stream set, stream ID:', event.streams[0].id);
                     isPlaying = false;
                 }
-
-                if (!isPlaying) {
-                    setTimeout(() => {
-                        isPlaying = true;
-                        remoteVideo.play()
-                            .then(() => console.log('Playback started for stream ID:', event.streams[0].id))
-                            .catch(error => {
-                                console.error('Failed to start playback:', error);
-                                updateStatus('Auto-play failed; please click to play.');
-                                remoteVideo.onclick = () => remoteVideo.play();
-                            });
-                    }, 100);
-                }
+            if (!isPlaying) {
+                setTimeout(() => {
+                    isPlaying = true;
+                    remoteVideo.play()
+                        .then(() => {
+                            console.log('Playback started for stream ID:', event.streams[0].id);
+                            // Send confirmation message to WebSocket server
+                            ws.send(JSON.stringify({ type: 'stream-playing', data: 'Stream is actively playing on the receiver side.' }));
+                        })
+                        .catch(error => {
+                            console.error('Failed to start playback:', error);
+                            updateStatus('Auto-play failed; please click to play.');
+                            remoteVideo.onclick = () => remoteVideo.play();
+                        });
+                }, 100);
+            }
             };
 
             peer.oniceconnectionstatechange = () => {
