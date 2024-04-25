@@ -1,12 +1,26 @@
+const fs = require('fs');
+const https = require('https');
 const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: 8080 });
 
-console.log('WebSocket server started on ws://localhost:8080');
+// Load SSL certificate and private key from file system
+const serverOptions = {
+    cert: fs.readFileSync('cert.pem'),
+    key: fs.readFileSync('key.pem')
+};
 
+// Create an HTTPS server using the loaded certificate and key
+const httpsServer = https.createServer(serverOptions);
+httpsServer.listen(8080, () => console.log('HTTPS and WebSocket server started on wss://localhost:8080'));
+
+// Bind WebSocket server to HTTPS server
+const wss = new WebSocket.Server({ server: httpsServer });
+console.log('Secure WebSocket server started on wss://localhost:8080');
+
+// Handle new WebSocket connections
 wss.on('connection', function(ws) {
     console.log('New client connected.');
 
-    // Configure WebSocket connection to handle text messages
+    // Handle incoming messages from clients
     ws.on('message', function(message) {
         console.log(`Received message: ${message}`);
         try {
@@ -18,10 +32,12 @@ wss.on('connection', function(ws) {
         }
     });
 
+    // Log when a client disconnects
     ws.on('close', () => {
         console.log('Client has disconnected.');
     });
 
+    // Log errors related to the WebSocket connection
     ws.on('error', (error) => {
         console.error(`WebSocket error: ${error}`);
     });
@@ -54,7 +70,7 @@ function handleClientMessage(data, ws) {
             distributeMessage(data, ws);
             break;
         case 'stream-playing':
-            console.log('Stream-playing message received:', data.data);
+            console.log('Stream playing message received:', data.data);
             // Send this message back to the sender or handle it as needed
             distributeMessage(data, ws);
             break;

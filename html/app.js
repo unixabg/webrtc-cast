@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
-    let ws = new WebSocket('ws://ws-server:8080');
+    const ws = new WebSocket('wss://ws-server:8080');
 
     ws.onopen = () => {
         console.log('WebSocket connection established.');
