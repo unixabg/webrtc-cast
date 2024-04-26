@@ -135,6 +135,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error during screen sharing setup:', error);
                 updateStatus('Setup Error', 'red');
                 updateStreamingStatus('Streaming failed', 'red');
+                setTimeout(() => {
+                    updateStatus('Connected', 'green');
+                }, 3000);
+                startButton.disabled = false;
+                stopButton.disabled = true;
             });
     }
 
