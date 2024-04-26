@@ -109,8 +109,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     stopButton.addEventListener('click', () => {
         stopScreenSharing();
-        startButton.disabled = false;
-        stopButton.disabled = true;
     });
 
     function updateStreamingStatus(text, color) {
@@ -170,6 +168,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         console.log('Screen sharing stopped.');
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
+        startButton.disabled = false;
+        stopButton.disabled = true;
     }
 
     function handleTrackEnd() {
