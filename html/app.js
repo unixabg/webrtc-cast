@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('WebSocket connection established.');
         updateStatus('Connected', 'green');
         startButton.disabled = false;
+        sendHeartbeat(ws);
     };
 
     ws.onerror = (event) => {
@@ -57,9 +58,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         updateStatus('ICE Error', 'red');
                     });
                 break;
+            case 'pong':
+                console.log(message.data);
+                clearTimeout(confirmationTimeout); // Cancel the timeout if pong response is received
+                break;
         }
     };
-
 
     peer.onicecandidate = event => {
         if (event.candidate) {
@@ -78,6 +82,22 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateStatus(text, color) {
         connectionStatus.textContent = `● ${text}`;
         connectionStatus.style.color = color;
+    }
+
+    // Heartbeat function to ensure the WebSocket connection is alive
+    function sendHeartbeat(ws) {
+      setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+          console.log('Sent ping to server');
+          confirmationTimeout = setTimeout(() => {
+            console.log('Pong response timed out. Assuming connection lost.');
+            stopScreenSharing(); // Stop sharing the stream
+          }, 60000); // 60 seconds
+        } else {
+          console.log('Connection not open, cannot send heartbeat');
+        }
+      }, 30000); // Send heartbeat every 30 seconds
     }
 
     // Event listeners for buttons

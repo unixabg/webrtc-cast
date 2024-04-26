@@ -60,7 +60,16 @@ function handleClientMessage(data, ws) {
             console.log('Answer received, distributing to other clients.');
             distributeMessage(data, ws);
             break;
-        case 'candidate':
+        case 'ping':
+            console.log('Ping received, sending ping to clients.');
+            distributeMessage(data, ws);
+            //ws.send(JSON.stringify({ type: 'ping' }));
+            break;
+        case 'pong':
+            console.log('Pong received, sending pong to clients.', data.data);
+            distributeMessage(data, ws);
+            break;
+         case 'candidate':
             console.log('Candidate received, distributing to other clients.');
             distributeMessage(data, ws);
             break;

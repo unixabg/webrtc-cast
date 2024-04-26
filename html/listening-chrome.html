@@ -120,6 +120,10 @@
                 const message = JSON.parse(event.data);
                 console.log('Message received:', message.type);
                 switch (message.type) {
+                    case 'ping':
+                        console.log('Received ping from a client station.');
+                        ws.send(JSON.stringify({ type: 'pong', data: 'Station with listening-chrome.html is alive.' }));
+                        break;
                     case 'stream-stopped':
                         console.log('Stream stopped by the client.');
                         updateStatus('Stream stopped by client. Waiting for new stream...');
