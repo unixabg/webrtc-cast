@@ -111,6 +111,9 @@
                         // Implement logic to attempt to re-establish the connection
                         console.log('Attempting to re-establish connection...');
                     }
+                    setTimeout(() => {
+                        location.reload(); // Refresh the page after a short delay
+                    }, 3000); // 3-second delay
                 } else if (peer.iceConnectionState === 'connected') {
                     updateStatus('Connection established'); // Provide feedback when connection is stable
                 }
