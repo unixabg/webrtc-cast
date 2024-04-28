@@ -15,6 +15,7 @@ Use WebRTC to cast chrome
 * On both the client and the server you need to accept the ssl certificates. In general setup I run the socket server on ws-server:8080 and the web server on ws-server:8081.
     * If you self sign cert then you must accept ssl key for both https://ws-server:8080 and https://ws-server:8081
 * Lanuch chromium in kiosk mode with something like this: `chromium --disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies --ignore-certificate-errors --kiosk https://localhost:8081/listening-chrome.html`
+* Or like this: `chromium --disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies --ignore-urlfetcher-cert-requests --ignore-websocket-cert-errors --kiosk file:///path/to/webrtc-cast/html/listening-chrome.html`
 * On the client machine you want to share your screen go to https://ws-server:8081 and click the client.html. Remember you have to accept the certs for both server and socket server if cert self signed.
 
 FIXME
