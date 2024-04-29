@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     ws.onclose = () => {
+        stopScreenSharing();
         console.log('WebSocket connection closed.');
         updateStatus('Disconnected', 'red');
         startButton.disabled = true;
