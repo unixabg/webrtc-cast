@@ -8,9 +8,27 @@ const serverOptions = {
     key: fs.readFileSync('key.pem')
 };
 
-// Create an HTTPS server using the loaded certificate and key
-const httpsServer = https.createServer(serverOptions);
-httpsServer.listen(8080, () => console.log('HTTPS and WebSocket server started on wss://localhost:8080'));
+// Create an HTTP server for serving HTML files
+const httpsServer = https.createServer(serverOptions, (req, res) => {
+  console.log(`Received request for: ${req.url}`);
+  const url = req.url;
+  if (url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(fs.readFileSync('./html/client.html', 'utf8'));
+  } else if (url === '/app.js') {
+    res.writeHead(200, { 'Content-Type': 'application/javascript' });
+    res.end(fs.readFileSync('./html/app.js', 'utf8'));
+  } else if (url === '/listening-chrome.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(fs.readFileSync('./html/listening-chrome.html', 'utf8'));
+  } else if (url === '/style.css') {
+    res.writeHead(200, { 'Content-Type': 'text/css' });
+    res.end(fs.readFileSync('./html/style.css', 'utf8'));
+  } else {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('File not found');
+  }
+});
 
 // Bind WebSocket server to HTTPS server
 const wss = new WebSocket.Server({ server: httpsServer });
@@ -99,3 +117,7 @@ function distributeMessage(data, ws) {
     });
 }
 
+// Start the HTTPS server
+httpsServer.listen(8080, () => {
+  console.log('HTTP and WebSocket server started on http://localhost:8080');
+});
