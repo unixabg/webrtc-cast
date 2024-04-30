@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Client</title>
+    <style>
+        video-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .button-container {
+            display: flex;
+            margin-top: 20px;
+        }
+    </style>
 </head>
 <body>
     <h1>WebRTC Screen Sharing Client</h1>
@@ -11,10 +22,13 @@
     <!-- Connection status indicator -->
     <div id="connectionStatus" style="color: blue;">● Waiting for connection...</div>
     <div id="streamingStatus" style="color: blue;">● Streaming is inactive</div>
-    <video id="localVideo" autoplay playsinline controls style="width: 100%; height: auto;"></video>
-    <button id="startButton" disabled>Start Sharing</button>
-    <button id="stopButton" disabled>Stop Sharing</button>
-
+    <div class="video-container">
+      <video id="localVideo" autoplay playsinline controls style="width: 50%; height: auto;"></video>
+      <div class="button-container">
+          <button id="startButton" disabled>Start Sharing</button>
+          <button id="stopButton" disabled>Stop Sharing</button>
+      </div>
+    </div>
     <script src="app.js"></script>
 </body>
 </html>
