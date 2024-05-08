@@ -1,6 +1,7 @@
 const fs = require('fs');
 const https = require('https');
 const WebSocket = require('ws');
+const { exec } = require('child_process');
 
 // Load SSL certificate and private key from file system
 const serverOptions = {
@@ -11,22 +12,76 @@ const serverOptions = {
 // Create an HTTP server for serving HTML files
 const httpsServer = https.createServer(serverOptions, (req, res) => {
   console.log(`Received request for: ${req.url}`);
-  const url = req.url;
-  if (url === '/') {
+  // Access query params using req.query directly (Express-like approach)
+  const queryParams = new URLSearchParams(req.url.split('?')[1]);
+  const url = req.url.split('?')[0];
+
+  console.log('Full url is ', req.url);
+  console.log('Base url is: ', url);
+
+  if (url === '/wifi-setup') {
+    const html = `
+      <html>
+        <body>
+          <form action="/setup-wifi" method="get">
+            <label for="ssid">SSID:</label>
+            <input type="text" id="ssid" name="ssid"><br><br>
+            <label for="psk">PSK:</label>
+            <input type="password" id="psk" name="psk"><br><br>
+            <input type="submit" value="Submit">
+          </form>
+        </body>
+      </html>
+    `;
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(fs.readFileSync('./html/client.html', 'utf8'));
-  } else if (url === '/app.js') {
-    res.writeHead(200, { 'Content-Type': 'application/javascript' });
-    res.end(fs.readFileSync('./html/app.js', 'utf8'));
-  } else if (url === '/listening-chrome.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(fs.readFileSync('./html/listening-chrome.html', 'utf8'));
-  } else if (url === '/style.css') {
-    res.writeHead(200, { 'Content-Type': 'text/css' });
-    res.end(fs.readFileSync('./html/style.css', 'utf8'));
+    res.end(html);
+  } else if (url === '/setup-wifi') {
+    // Set specific query params
+    const ssid = queryParams.get('ssid');
+    const psk = queryParams.get('psk');
+    console.log(`Params: ${ssid} and ${psk}`);
+
+     // Write the Wi-Fi configuration to the file
+     exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
+allow-hotplug wlan0
+iface wlan0 inet dhcp
+wpa-ssid ${ssid}
+wpa-psk ${psk}
+EOF`, (error, stdout, stderr) => {
+       if (error) {
+         res.writeHead(500, { 'Content-Type': 'text/plain' });
+         res.end(`Error: ${error.message}`);
+         console.log(`Error: ${error.message}`);
+       } else {
+         //res.writeHead(200, { 'Content-Type': 'text/plain' });
+         //res.end('Wi-Fi configuration written successfully');
+         const html = `
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="2; URL='/'" />
+      </head>
+      <body>
+        <h1>Wi-Fi setup successful!</h1>
+      </body>
+    </html>
+  `;
+         res.writeHead(200, { 'Content-Type': 'text/html' });
+         res.end(html);
+         console.log('Wi-Fi configuration written successfully');
+       }
+      });
   } else {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('File not found');
+    // Handle other URLs as before
+    if (url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(fs.readFileSync('./html/client.html', 'utf8'));
+    } else if (url === '/app.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      res.end(fs.readFileSync('./html/app.js', 'utf8'));
+    } else if (url === '/listening-chrome.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      
+    }
   }
 });
 
