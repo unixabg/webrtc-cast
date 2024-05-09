@@ -23,13 +23,36 @@ const httpsServer = https.createServer(serverOptions, (req, res) => {
     const html = `
       <html>
         <body>
-          <form action="/setup-wifi" method="get">
-            <label for="ssid">SSID:</label>
-            <input type="text" id="ssid" name="ssid"><br><br>
-            <label for="psk">PSK:</label>
-            <input type="password" id="psk" name="psk"><br><br>
-            <input type="submit" value="Submit">
-          </form>
+          <h1>WebRTC-Cast WiFi Setup</h1>
+          <table>
+            <tr>
+              <td>
+                <h2>Station WiFi</h2>
+                <form action="/setup-wifi" method="get">
+                  <label for="ssid">SSID:</label>
+                  <input type="text" id="ssid" name="ssid"><br><br>
+                  <label for="psk">PSK:</label>
+                  <input type="password" id="psk" name="psk"><br><br>
+                  <input type="submit" value="Submit">
+                </form>
+              </td>
+              <td>
+                <h2>AP WiFi</h2>
+                <form action="/setup-ap" method="get">
+                  <label for="ap_ssid">SSID:</label>
+                  <input type="text" id="ap_ssid" name="ap_ssid"><br><br>
+                  <label for="ap_psk">PSK:</label>
+                  <input type="password" id="ap_psk" name="ap_psk"><br><br>
+                  <input type="submit" value="Submit">
+                </form>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
+              </td>
+            </tr>
+          </table>
         </body>
       </html>
     `;
@@ -39,7 +62,7 @@ const httpsServer = https.createServer(serverOptions, (req, res) => {
     // Set specific query params
     const ssid = queryParams.get('ssid');
     const psk = queryParams.get('psk');
-    console.log(`Params: ${ssid} and ${psk}`);
+    console.log(`Station Params: ${ssid} and ${psk}`);
 
      // Write the Wi-Fi configuration to the file
      exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
@@ -58,10 +81,11 @@ EOF`, (error, stdout, stderr) => {
          const html = `
     <html>
       <head>
-        <meta http-equiv="refresh" content="2; URL='/'" />
+        <meta http-equiv="refresh" content="3; URL='/wifi-setup'" />
       </head>
       <body>
-        <h1>Wi-Fi setup successful!</h1>
+        <h1>Station WiFi setup successful!</h1>
+        <h2>Reboot to apply the settings!</h1>
       </body>
     </html>
   `;
@@ -69,7 +93,60 @@ EOF`, (error, stdout, stderr) => {
          res.end(html);
          console.log('Wi-Fi configuration written successfully');
        }
-      });
+    });
+  } else if (url === '/setup-ap') {
+    // Set specific query params
+    const ap_ssid = queryParams.get('ap_ssid');
+    const ap_psk = queryParams.get('ap_psk');
+    console.log(`AP Params: ${ap_ssid} and ${ap_psk}`);
+
+     // Write the Wi-Fi configuration to the file
+     exec(`sudo sed -i 's/^ssid=.*/ssid=${ap_ssid}/; s/^wpa_passphrase=.*/wpa_passphrase=${ap_psk}/' /etc/hostapd/hostapd.conf`, (error, stdout, stderr) => {
+       if (error) {
+         res.writeHead(500, { 'Content-Type': 'text/plain' });
+         res.end(`Error: ${error.message}`);
+         console.log(`Error: ${error.message}`);
+       } else {
+         //res.writeHead(200, { 'Content-Type': 'text/plain' });
+         //res.end('Wi-Fi configuration written successfully');
+         const html = `
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="3; URL='/wifi-setup'" />
+      </head>
+      <body>
+        <h1>AP WiFi setup successful!</h1>
+        <h2>Reboot to apply the settings!</h1>
+      </body>
+    </html>
+  `;
+         res.writeHead(200, { 'Content-Type': 'text/html' });
+         res.end(html);
+         console.log('AP configuration written successfully');
+       }
+    });
+  } else if (url === '/reboot') {
+    // Reboot the system to apply the setting
+    const html = `
+      <html>
+        <head>
+          <meta http-equiv="refresh" content="1; URL='/'" />
+        </head>
+        <body>
+          <h2>Rebooting WebRTC-Cast!</h1>
+        </body>
+     </html>
+  `;
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
+    console.log('Reboot called');
+    exec(`sudo reboot`, (error, stdout, stderr) => {
+      if (error) {
+        console.log(`Error: ${error.message}`);
+      } else {
+        console.log('Reboot called');
+      }
+    });
   } else {
     // Handle other URLs as before
     if (url === '/') {
@@ -80,7 +157,6 @@ EOF`, (error, stdout, stderr) => {
       res.end(fs.readFileSync('./html/app.js', 'utf8'));
     } else if (url === '/listening-chrome.html') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      
     }
   }
 });
