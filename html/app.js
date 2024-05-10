@@ -4,10 +4,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const startButton = document.getElementById('startButton');
     const stopButton = document.getElementById('stopButton');
 
-    // Configure the RTCPeerConnection with Google's public STUN server
-    const peer = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
+    const peer = new RTCPeerConnection();
 
     const ws = new WebSocket('wss://ws-server:8080');
 

@@ -57,9 +57,7 @@
             }
 
             const ws = new WebSocket('wss://ws-server:8080');
-            const peer = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-            });
+            const peer = new RTCPeerConnection();
 
             let isPlaying = false; // Flag to manage play state
 
