@@ -64,6 +64,8 @@
 
             peer.ontrack = event => {
                 console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
+                remoteVideo.srcObject = event.streams[0];
+                // updateStatus('Stream is active');
                 if (!knownTracks.has(event.track.id)) {
                     knownTracks.add(event.track.id);
                     console.log('Adding new track ID to known tracks.');
@@ -73,7 +75,6 @@
                 }
 
                 if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== event.streams[0].id) {
-                    remoteVideo.srcObject = event.streams[0];
                     console.log('New stream set, stream ID:', event.streams[0].id);
                     isPlaying = false;
                 }
