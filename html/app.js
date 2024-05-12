@@ -6,7 +6,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const peer = new RTCPeerConnection();
 
-    const ws = new WebSocket('wss://ws-server:8080');
+    // Use the current hostname to dynamically create the WebSocket URL
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname;
+    const port = window.location.port ? `:${window.location.port}` : '';
+    const wsUrl = `${protocol}//${host}${port}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         console.log('WebSocket connection established.');
