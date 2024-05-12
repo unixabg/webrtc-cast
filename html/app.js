@@ -68,15 +68,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    peer.onicecandidate = event => {
-        if (event.candidate) {
-            ws.send(JSON.stringify({ type: 'candidate', data: event.candidate }));
-            console.log('ICE candidate sent:', event.candidate);
-        } else {
-            console.log('No more ICE candidates.');
-        }
-    };
-
     peer.ontrack = event => {
         video.srcObject = event.streams[0];
         console.log('Stream added to local video.');

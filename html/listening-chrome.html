@@ -96,27 +96,6 @@
             }
             };
 
-            peer.oniceconnectionstatechange = () => {
-                console.log('ICE connection state change:', peer.iceConnectionState);
-                if (['disconnected', 'failed', 'closed'].includes(peer.iceConnectionState)) {
-                    console.log('ICE connection state is disconnected, failed, or closed.');
-                    knownTracks.clear(); // Reset known tracks when connection is lost
-                    isPlaying = false; // Also reset the playback state to ensure consistency
-                    updateStatus('Connection failed or disconnected'); // Update UI to reflect the status
-
-                    // Optionally, handle reconnection logic here if applicable
-                    if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
-                        // Implement logic to attempt to re-establish the connection
-                        console.log('Attempting to re-establish connection...');
-                    }
-                    setTimeout(() => {
-                        location.reload(); // Refresh the page after a short delay
-                    }, 3000); // 3-second delay
-                } else if (peer.iceConnectionState === 'connected') {
-                    updateStatus('Connection established'); // Provide feedback when connection is stable
-                }
-            };
-
             ws.onmessage = event => {
                 const message = JSON.parse(event.data);
                 console.log('Message received:', message.type);
@@ -143,11 +122,6 @@
                                 ws.send(JSON.stringify({ type: 'answer', data: peer.localDescription }));
                             })
                             .catch(error => console.error('Error during SDP exchange:', error));
-                        break;
-                    case 'candidate':
-                        console.log('ICE candidate received, adding to peer connection.');
-                        peer.addIceCandidate(new RTCIceCandidate(message.data))
-                            .catch(error => console.error('Failed to add ICE candidate:', error));
                         break;
                 }
             };
