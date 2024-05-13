@@ -45,6 +45,23 @@
             // Initialize knownTracks as a set to track the IDs of received tracks
             const knownTracks = new Set();
 
+            const ws = new WebSocket('wss://ws-server:8080');
+            const peer = new RTCPeerConnection();
+
+            let isPlaying = false; // Flag to manage play state
+            let lastPongTimestamp = Date.now();
+
+            const checkConnection = () => {
+                if (Date.now() - lastPongTimestamp > 10000) { // 10 seconds without a pong
+                    updateStatus('Connection lost. No ping received from client player, refreshing page for next connection...');
+                    console.error('Connection lost. No ping received from client player, refreshing page for next connection...');
+                    remoteVideo.srcObject = null;
+                    setTimeout(() => {
+                        window.location.reload(); // Refresh the page to handle reconnection
+                    }, 3000); // Delay the refresh to give users time to see the status update
+                }
+            };
+
             function updateStatus(message) {
                 statusOverlay.textContent = `Status: ${message}`;
                 if (message.includes("Connected") || message.includes("Listening") || message.includes("Waiting") || message.includes("failed") || message.includes("disconnected")) {
@@ -55,12 +72,6 @@
                     document.getElementById('alternativeContent').style.display = 'none'; // Show alternative content
                 }
             }
-
-            const ws = new WebSocket('wss://ws-server:8080');
-            const peer = new RTCPeerConnection();
-
-            let isPlaying = false; // Flag to manage play state
-
 
             peer.ontrack = event => {
                 console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
@@ -104,6 +115,7 @@
                     case 'ping':
                         console.log('Received ping from a client station.');
                         ws.send(JSON.stringify({ type: 'pong', data: 'Station with listening-chrome.html is alive.' }));
+                        lastPongTimestamp = Date.now();
                         break;
                     case 'stream-stopped':
                         console.log('Stream stopped by the client.');
@@ -142,6 +154,7 @@
                 console.log('WebSocket connection closed.');
                 updateStatus('WebSocket disconnected');
             };
+            setInterval(checkConnection, 5000); // Check every 5 seconds
         });
     </script>
 </body>

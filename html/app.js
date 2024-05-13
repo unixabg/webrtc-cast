@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
             case 'answer':
                 peer.setRemoteDescription(new RTCSessionDescription(message.data))
-                    .then(() => console.log('Remote description successfully set.'))
+                    .then(() => console.log('Answer received. Remote description successfully set.'))
                     .catch(error => {
                         console.error('Failed to set remote description:', error);
                         updateStatus('SDP Error', 'red');
@@ -83,15 +83,16 @@ document.addEventListener('DOMContentLoaded', function() {
       setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'ping' }));
-          console.log('Sent ping to server');
+          console.log('Sent ping to listening server');
           confirmationTimeout = setTimeout(() => {
             console.log('Pong response timed out. Assuming connection lost.');
             stopScreenSharing(); // Stop sharing the stream
-          }, 60000); // 60 seconds
+          }, 10000); // 10 seconds
         } else {
           console.log('Connection not open, cannot send heartbeat');
         }
-      }, 30000); // Send heartbeat every 30 seconds
+        console.log('Update connection status');
+      }, 5000); // Send heartbeat every 5 seconds
     }
 
     // Event listeners for buttons
@@ -172,5 +173,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('stopButton').disabled = true;
         stopScreenSharing();
     }
+
 });
 
