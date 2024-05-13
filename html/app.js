@@ -53,14 +53,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         updateStatus('SDP Error', 'red');
                     });
                 break;
-            case 'candidate':
-                peer.addIceCandidate(new RTCIceCandidate(message.data))
-                    .then(() => console.log('ICE candidate successfully added.'))
-                    .catch(error => {
-                        console.error('Failed to add ICE candidate:', error);
-                        updateStatus('ICE Error', 'red');
-                    });
-                break;
             case 'pong':
                 console.log(message.data);
                 clearTimeout(confirmationTimeout); // Cancel the timeout if pong response is received
