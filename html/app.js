@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     .catch(error => {
                         console.error('Failed to set remote description:', error);
                         updateStatus('SDP Error', 'red');
-                    });
+                     });
                 break;
             case 'pong':
                 console.log(message.data);
@@ -104,59 +104,102 @@ document.addEventListener('DOMContentLoaded', function() {
         streamingStatus.style.color = color;
     }
 
-    function startScreenSharing() {
-        navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-            .then(stream => {
-                console.log('Display media obtained:', stream);
-                video.srcObject = stream;
-                // Start the timer as soon as the stream starts
-                const confirmationTimeout = setTimeout(() => {
-                    if (!streamPlayingConfirmed) {
-                        console.error('No confirmation for stream playing received.');
-                        handleTrackEnd(); // Stop the streaming
-                        updateStreamingStatus('No confirmation received, streaming stopped', 'red');
-                    }
-                }, 10000); // Timeout set for 10 seconds
+    function startScreenSharing(retryCount = 0) {
+        const maxRetries = 3; // Maximum number of retries
 
-                stream.getTracks().forEach(track => {
-                    console.log('Adding track:', track);
+        function handleRetryOrFailure() {
+            if (retryCount < maxRetries) {
+               console.log(`Retry ${retryCount + 1} of ${maxRetries}`);
+               startScreenSharing(retryCount + 1); // Retry the process
+            } else {
+                console.error('Maximum retries reached. Stopping attempts.');
+                updateStreamingStatus('Streaming failed', 'red');
+             }
+        }
+
+        function sendOffer(stream, retryCount) {
+            stream.getTracks().forEach(track => {
+                if (!peer.getSenders().some(sender => sender.track === track)) {
                     peer.addTrack(track, stream);
-                    track.onended = () => {
-                        console.log('Track ended:', track.kind);
-                        handleTrackEnd();
-                    };
-                });
-                return peer.createOffer();
-            })
-            .then(offer => {
-                console.log('Offer created:', offer);
+                }
+            });
+
+            peer.createOffer().then(offer => {
                 return peer.setLocalDescription(offer);
-            })
-            .then(() => {
+            }).then(() => {
                 console.log('Sending offer:', peer.localDescription);
                 ws.send(JSON.stringify({ type: 'offer', data: peer.localDescription }));
-            })
-            .catch(error => {
-                console.error('Error during screen sharing setup:', error);
-                updateStatus('Setup Error', 'red');
-                updateStreamingStatus('Streaming failed', 'red');
                 setTimeout(() => {
-                    updateStatus('Connected', 'green');
-                }, 3000);
-                startButton.disabled = false;
-                stopButton.disabled = true;
+                    if (!streamPlayingConfirmed) {
+                        console.error('No confirmation for stream playing received.');
+                        handleRetryOrFailure();
+                    }
+                }, 5000); // Timeout set for 5 seconds
+            }).catch(error => {
+                console.error('Error during offer creation or sending:', error);
+                handleRetryOrFailure();
             });
+        }
+
+        if (retryCount === 0) { // Only prompt for the stream if it's the first attempt
+            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+                .then(stream => {
+                    currentStream = stream;
+                    video.srcObject = stream;
+
+                    // Handle the browser UI stop action
+                    stream.getTracks().forEach(track => {
+                        track.onended = () => {
+                            console.log('User has stopped sharing through the browser UI.');
+                            handleTrackEnd(); // Handle as if the stop button was clicked
+                        };
+                    });
+
+                    sendOffer(stream, retryCount);
+                })
+                .catch(error => {
+                    console.error('Error obtaining display media:', error);
+                    updateStatus('Setup Error', 'red');
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                });
+        } else {
+            console.log(`Retry ${retryCount} of ${maxRetries}`);
+            sendOffer(currentStream, retryCount);
+        }
     }
 
     function stopScreenSharing() {
+        // Ensure that the video's srcObject is not null before trying to stop the tracks
         if (video.srcObject) {
-            video.srcObject.getTracks().forEach(track => track.stop());
-            updateStreamingStatus('Streaming stopped', 'red'); // Update streaming status
+            const tracks = video.srcObject.getTracks(); // Get all tracks from the stream
+            tracks.forEach(track => track.stop()); // Stop each track
+            video.srcObject = null; // Clear the srcObject to release the stream
+            console.log('Screen sharing stopped.');
+            updateStreamingStatus('Streaming stopped', 'red'); // Update streaming status on UI
+        } else {
+            console.log('No stream to stop.');
         }
-        console.log('Screen sharing stopped.');
-        ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
+
+        // Reset UI components
         startButton.disabled = false;
         stopButton.disabled = true;
+
+        // Send message to the server indicating that the streaming has stopped
+        ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
+
+        // Optionally reset the streamPlayingConfirmed flag if you want to ensure clean state for next start
+        streamPlayingConfirmed = false;
+
+        // Send message to the server to refresh the page
+        console.error('Stop screen sharing requesting a page refresh to encourage the listening-chrome.html to listen better.');
+        ws.send(JSON.stringify({ type: 'listening-refresh', data: 'Stop screen sharing requesting a page refresh on a retry share attempt.' }));
+
+        // Clear any ongoing confirmation timeouts to prevent them from firing after stopping
+        if (confirmationTimeout) {
+            clearTimeout(confirmationTimeout);
+            confirmationTimeout = null;
+        }
     }
 
     function handleTrackEnd() {

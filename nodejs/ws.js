@@ -222,6 +222,10 @@ function handleClientMessage(data, ws) {
             console.log('Candidate received, distributing to other clients.');
             distributeMessage(data, ws);
             break;
+        case 'listening-refresh':
+            console.log('Client called for a listening refresh:', data.data);
+            distributeMessage(data, ws);
+            break;
         case 'stream-stopped':
             console.log('Stream stopped message received:', data.data);
             // Notify all clients that the stream has been stopped.
