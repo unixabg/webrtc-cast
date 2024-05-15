@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const wsUrl = `${protocol}//${host}${port}`;
     const ws = new WebSocket(wsUrl);
 
+    let pingPongFailure = false; // Flag to watch ping pong
+
     ws.onopen = () => {
         console.log('WebSocket connection established.');
         updateStatus('Connected', 'green');
@@ -54,7 +56,8 @@ document.addEventListener('DOMContentLoaded', function() {
                      });
                 break;
             case 'pong':
-                console.log(message.data);
+                pingPongFailure = true;
+                console.log('Clearing pong confirmationTimeout');
                 clearTimeout(confirmationTimeout); // Cancel the timeout if pong response is received
                 break;
         }
@@ -78,12 +81,12 @@ document.addEventListener('DOMContentLoaded', function() {
           console.log('Sent ping to listening server');
           confirmationTimeout = setTimeout(() => {
             console.log('Pong response timed out. Assuming connection lost.');
+            pingPongFailure = true;
             stopScreenSharing(); // Stop sharing the stream
           }, 10000); // 10 seconds
         } else {
           console.log('Connection not open, cannot send heartbeat');
         }
-        console.log('Update connection status');
       }, 5000); // Send heartbeat every 5 seconds
     }
 
@@ -184,6 +187,15 @@ document.addEventListener('DOMContentLoaded', function() {
         // Reset UI components
         startButton.disabled = false;
         stopButton.disabled = true;
+
+        if (pingPongFailure) {
+            updateStatus('Network Error', 'red');
+            updateStreamingStatus('Please reload the page to attempt new connection', 'red');
+            startButton.disabled = true;
+            stopButton.disabled = true;
+        } else {
+            console.log('Ping Pong Good.');
+        }
 
         // Send message to the server indicating that the streaming has stopped
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
