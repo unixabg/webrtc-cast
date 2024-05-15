@@ -113,6 +113,7 @@
                 console.log('Message received:', message.type);
                 switch (message.type) {
                     case 'ping':
+                        setInterval(checkConnection, 5000); // Once a client pings us check the connectivity
                         console.log('Received ping from a client station.');
                         ws.send(JSON.stringify({ type: 'pong', data: 'Station with listening-chrome.html is alive.' }));
                         lastPongTimestamp = Date.now();
@@ -160,7 +161,6 @@
                 console.log('WebSocket connection closed.');
                 updateStatus('WebSocket disconnected');
             };
-            setInterval(checkConnection, 5000); // Check every 5 seconds
         });
     </script>
 </body>
