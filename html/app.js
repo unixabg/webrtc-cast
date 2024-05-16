@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function() {
                      });
                 break;
             case 'pong':
-                pingPongFailure = true;
+                pingPongFailure = false;
                 console.log('Clearing pong confirmationTimeout');
                 clearTimeout(confirmationTimeout); // Cancel the timeout if pong response is received
                 break;
