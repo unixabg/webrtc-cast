@@ -195,6 +195,9 @@
             ws.onclose = () => {
                 console.log('WebSocket connection closed.');
                 updateStatus('WebSocket disconnected');
+                setTimeout(() => {
+                    window.location.reload(); // Refresh the page to handle reconnection
+                }, 7000); // Delay the refresh to give users time to see the status update
             };
         });
     </script>
