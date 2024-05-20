@@ -31,9 +31,8 @@
             align-items: center;
         }
         #internetIndicator {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
+            width: 16px;
+            height: 16px;
             margin-right: 10px;
         }
     </style>
@@ -42,7 +41,7 @@
     <div id="videoContainer">
         <video id="remoteVideo" autoplay playsinline controls muted></video>
         <div id="statusOverlay">
-            <div id="internetIndicator" style="background-color: gray;"></div>
+            <svg id="internetIndicator" viewBox="0 0 24 24"></svg>
             <span id="statusText">Status: Waiting for stream...</span>
         </div>
     </div>
@@ -88,9 +87,17 @@
             // Function to update internet status
             function updateInternetStatus(isConnected) {
                 if (isConnected) {
-                    internetIndicator.style.backgroundColor = '#00FF00';
+                    internetIndicator.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="green">
+                            <path d="M12 3C7.58 3 3.63 5.11 1 8.25L2.41 9.66C4.63 7.09 8.14 5.27 12 5.27C15.86 5.27 19.37 7.09 21.59 9.66L23 8.25C20.37 5.11 16.42 3 12 3M3.5 11.5L5.2 13.2C6.82 11.5 9.26 10.26 12 10.26S17.18 11.5 18.8 13.2L20.5 11.5C18.45 9.35 15.36 8 12 8S5.55 9.35 3.5 11.5M7 15L12 20L17 15H7Z" />
+                        </svg>
+                    `;
                 } else {
-                    internetIndicator.style.backgroundColor = 'red';
+                    internetIndicator.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="red">
+                            <path d="M12 3C7.58 3 3.63 5.11 1 8.25L2.41 9.66C4.63 7.09 8.14 5.27 12 5.27C15.86 5.27 19.37 7.09 21.59 9.66L23 8.25C20.37 5.11 16.42 3 12 3M3.5 11.5L5.2 13.2C6.82 11.5 9.26 10.26 12 10.26S17.18 11.5 18.8 13.2L20.5 11.5C18.45 9.35 15.36 8 12 8S5.55 9.35 3.5 11.5M7 15L12 20L17 15H7Z" />
+                        </svg>
+                    `;
                 }
             }
 
@@ -105,7 +112,6 @@
 
             peer.ontrack = event => {
                 console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
-                // updateStatus('Stream is active');
                 remoteVideo.srcObject = event.streams[0];
                 if (!knownTracks.has(event.track.id)) {
                     knownTracks.add(event.track.id);
