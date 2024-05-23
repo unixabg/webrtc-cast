@@ -47,7 +47,7 @@
         <video id="remoteVideo" autoplay playsinline controls muted></video>
         <div id="statusOverlay">
             <svg id="internetIndicator" viewBox="0 0 24 24" fill="grey">
-	        <path d="M12 3C7.58 3 3.63 5.11 1 8.25L2.41 9.66C4.63 7.09 8.14 5.27 12 5.27C15.86 5.27 19.37 7.09 21.59 9.66L23 8.25C20.37 5.11 16.42 3 12 3M3.5 11.5L5.2 13.2C6.82 11.5 9.26 10.26 12 10.26S17.18 11.5 18.8 13.2L20.5 11.5C18.45 9.35 15.36 8 12 8S5.55 9.35 3.5 11.5M7 15L12 20L17 15H7Z" />
+                <path d="M12 3C7.58 3 3.63 5.11 1 8.25L2.41 9.66C4.63 7.09 8.14 5.27 12 5.27C15.86 5.27 19.37 7.09 21.59 9.66L23 8.25C20.37 5.11 16.42 3 12 3M3.5 11.5L5.2 13.2C6.82 11.5 9.26 10.26 12 10.26S17.18 11.5 18.8 13.2L20.5 11.5C18.45 9.35 15.36 8 12 8S5.55 9.35 3.5 11.5M7 15L12 20L17 15H7Z" />
             </svg>
             <svg id="streamingIndicator" viewBox="0 0 24 24" fill="grey">
                 <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
@@ -139,19 +139,16 @@
 
             peer.ontrack = event => {
                 console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
-                remoteVideo.srcObject = event.streams[0];
-                if (!knownTracks.has(event.track.id)) {
-                    knownTracks.add(event.track.id);
-                    console.log('Adding new track ID to known tracks.');
-                } else {
-                    console.log('Track ID already known, skipping setting stream.');
-                    return; // Skip setting the stream if this track ID has been processed
+                if (!remoteVideo.srcObject) {
+                    remoteVideo.srcObject = new MediaStream();
                 }
 
-                if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== event.streams[0].id) {
-                    console.log('New stream set, stream ID:', event.streams[0].id);
-                    isPlaying = false;
-                }
+                // Add tracks to the video element
+                event.streams[0].getTracks().forEach(track => {
+                    remoteVideo.srcObject.addTrack(track);
+                });
+
+                // Check if playback is not already started
                 if (!isPlaying) {
                     setTimeout(() => {
                         isPlaying = true;
@@ -186,7 +183,7 @@
                             window.location.reload(); // Refresh the page to handle reconnection
                         }, 3000);
                         break;
-                     case 'stream-stopped':
+                    case 'stream-stopped':
                         console.log('Stream stopped by the client.');
                         updateStatus('Stream stopped by client. Waiting for new stream...');
                         isPlaying = false; // Reset play state
@@ -205,7 +202,20 @@
                             })
                             .catch(error => console.error('Error during SDP exchange:', error));
                         break;
-                }
+                    case 'unmute-audio':
+                        console.log('Unmute audio signal received.');
+                        remoteVideo.muted = false;
+                        remoteVideo.play().then(() => {
+                            console.log('Playback resumed after unmuting.');
+                        }).catch(error => {
+                            console.error('Failed to resume playback after unmuting:', error);
+                        });
+                        break;
+                     case 'mute-audio':
+                        console.log('Mute audio signal received.');
+                        remoteVideo.muted = true;
+                        break;
+                 }
             };
 
             ws.onopen = () => {

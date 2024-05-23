@@ -259,6 +259,14 @@ function handleClientMessage(data, ws) {
             console.log('Stream playing message received:', data.data);
             distributeMessage(data, ws);
             break;
+        case 'unmute-audio':
+            console.log('Unmute audio signal received.');
+            distributeMessage(data, ws);
+            break;
+         case 'mute-audio':
+            console.log('Mute audio signal received.');
+            distributeMessage(data, ws);
+            break;
         default:
             console.error('Unhandled message type:', data.type);
             ws.send(JSON.stringify({ error: 'Unhandled message type' }));

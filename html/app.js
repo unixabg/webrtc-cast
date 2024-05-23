@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const connectionStatus = document.getElementById('connectionStatus');
     const startButton = document.getElementById('startButton');
     const stopButton = document.getElementById('stopButton');
+    const toggleMuteButton = document.getElementById('toggleMuteButton');
 
     const peer = new RTCPeerConnection();
 
@@ -14,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const ws = new WebSocket(wsUrl);
 
     let pingPongFailure = false; // Flag to watch ping pong
+    let isMuted = true; // Initially muted
 
     ws.onopen = () => {
         console.log('WebSocket connection established.');
@@ -33,6 +35,7 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStatus('Disconnected', 'red');
         startButton.disabled = true;
         stopButton.disabled = true;
+        toggleMuteButton.disabled = true;
     };
 
     let confirmationTimeout; // Declare the timeout variable globally
@@ -46,6 +49,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateStreamingStatus('Stream is playing', 'green');
                 streamPlayingConfirmed = true; // Set the confirmation flag to true
                 clearTimeout(confirmationTimeout); // Clear the timeout
+                toggleMuteButton.disabled = false;
                 break;
             case 'answer':
                 peer.setRemoteDescription(new RTCSessionDescription(message.data))
@@ -53,7 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     .catch(error => {
                         console.error('Failed to set remote description:', error);
                         updateStatus('SDP Error', 'red');
-                     });
+                    });
                 break;
             case 'pong':
                 pingPongFailure = false;
@@ -75,19 +79,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Heartbeat function to ensure the WebSocket connection is alive
     function sendHeartbeat(ws) {
-      setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-          console.log('Sent ping to listening server');
-          confirmationTimeout = setTimeout(() => {
-            console.log('Pong response timed out. Assuming connection lost.');
-            pingPongFailure = true;
-            stopScreenSharing(); // Stop sharing the stream
-          }, 10000); // 10 seconds
-        } else {
-          console.log('Connection not open, cannot send heartbeat');
-        }
-      }, 5000); // Send heartbeat every 5 seconds
+        setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+                console.log('Sent ping to listening server');
+                confirmationTimeout = setTimeout(() => {
+                    console.log('Pong response timed out. Assuming connection lost.');
+                    pingPongFailure = true;
+                    stopScreenSharing(); // Stop sharing the stream
+                }, 10000); // 10 seconds
+            } else {
+                console.log('Connection not open, cannot send heartbeat');
+            }
+        }, 5000); // Send heartbeat every 5 seconds
     }
 
     // Event listeners for buttons
@@ -101,6 +105,13 @@ document.addEventListener('DOMContentLoaded', function() {
         stopScreenSharing();
     });
 
+    toggleMuteButton.addEventListener('click', () => {
+        console.log(`${isMuted ? 'Unmute' : 'Mute'} button clicked.`);
+        ws.send(JSON.stringify({ type: isMuted ? 'unmute-audio' : 'mute-audio' }));
+        isMuted = !isMuted;
+        toggleMuteButton.textContent = isMuted ? 'Unmute Audio' : 'Mute Audio';
+    });
+
     function updateStreamingStatus(text, color) {
         const streamingStatus = document.getElementById('streamingStatus');
         streamingStatus.textContent = `● ${text}`;
@@ -112,12 +123,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function handleRetryOrFailure() {
             if (retryCount < maxRetries) {
-               console.log(`Retry ${retryCount + 1} of ${maxRetries}`);
-               startScreenSharing(retryCount + 1); // Retry the process
+                console.log(`Retry ${retryCount + 1} of ${maxRetries}`);
+                startScreenSharing(retryCount + 1); // Retry the process
             } else {
                 console.error('Maximum retries reached. Stopping attempts.');
                 updateStreamingStatus('Streaming failed', 'red');
-             }
+            }
         }
 
         function sendOffer(stream, retryCount) {
@@ -187,6 +198,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Reset UI components
         startButton.disabled = false;
         stopButton.disabled = true;
+        toggleMuteButton.disabled = true;
 
         if (pingPongFailure) {
             updateStatus('Network Error', 'red');
@@ -206,12 +218,16 @@ document.addEventListener('DOMContentLoaded', function() {
         // Send message to the server to refresh the page
         console.error('Stop screen sharing requesting a page refresh to encourage the listening-chrome.html to listen better.');
         ws.send(JSON.stringify({ type: 'listening-refresh', data: 'Stop screen sharing requesting a page refresh on a retry share attempt.' }));
+        updateStreamingStatus('Streaming stopped. Page will reload...', 'red'); // Update streaming status on UI
 
         // Clear any ongoing confirmation timeouts to prevent them from firing after stopping
         if (confirmationTimeout) {
             clearTimeout(confirmationTimeout);
             confirmationTimeout = null;
         }
+        setTimeout(() => {
+            window.location.reload(); // Refresh the page to handle reconnection
+        }, 3000); // Delay the refresh to give users time to see the status update
     }
 
     function handleTrackEnd() {
