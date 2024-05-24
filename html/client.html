@@ -5,31 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Client</title>
     <style>
-        video-container {
+        body {
+            font-family: Arial, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
+        .status-container {
+            width: 100%;
+            max-width: 640px;
+            text-align: left;
+            margin-top: 10px;
+        }
+        .container {
+            display: flex;
+            width: 80%;
+            justify-content: space-between;
+            margin-top: 20px;
+            transition: width 0.3s ease;
+        }
+        .video-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+            transition: flex 0.3s ease;
+        }
         .button-container {
             display: flex;
             margin-top: 20px;
+        }
+        .diagnostics-container {
+            width: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: #f9f9f9;
+            border-left: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            overflow: hidden;
+            opacity: 0;
+            transition: width 0.3s ease, opacity 0.3s ease;
+        }
+        .diagnostics-content {
+            height: 500px;
+            overflow-y: scroll;
+            background-color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .toggle-button {
+            cursor: pointer;
+            background-color: #ddd;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ccc;
+            margin-left: 10px;
         }
     </style>
 </head>
 <body>
     <h1>WebRTC Screen Sharing Client</h1>
 
-    <!-- Connection status indicator -->
-    <div id="connectionStatus" style="color: blue;">● Waiting for connection...</div>
-    <div id="streamingStatus" style="color: blue;">● Streaming is inactive</div>
-    <div class="video-container">
-        <video id="localVideo" autoplay playsinline controls muted style="width: 50%; height: auto;"></video>
-        <div class="button-container">
-            <button id="toggleShareButton" disabled>Start Sharing</button>
-            <button id="toggleMuteButton" disabled>Unmute Audio</button>
+    <div class="status-container">
+        <div id="connectionStatus" style="color: blue;">● Waiting for connection...</div>
+        <div id="streamingStatus" style="color: blue;">● Streaming is inactive</div>
+    </div>
+
+    <div class="container">
+        <div class="video-container">
+            <video id="localVideo" autoplay playsinline controls muted style="width: 100%; max-width: 640px; height: auto; border: 1px solid grey;"></video>
+            <div class="button-container">
+                <button id="toggleShareButton" disabled>Start Sharing</button>
+                <button id="toggleMuteButton" disabled>Unmute Audio</button>
+                <button class="toggle-button" id="toggleDiagnosticsButton">Show Diagnostics</button>
+            </div>
+        </div>
+        <div class="diagnostics-container" id="diagnosticsContainer">
+            <div class="diagnostics-content" id="diagnosticsContent"></div>
         </div>
     </div>
+
     <script src="app.js"></script>
+    <script>
+        document.getElementById('toggleDiagnosticsButton').addEventListener('click', function() {
+            const diagnosticsContainer = document.getElementById('diagnosticsContainer');
+            const videoContainer = document.querySelector('.video-container');
+            const button = document.getElementById('toggleDiagnosticsButton');
+
+            if (diagnosticsContainer.style.width === '0px' || diagnosticsContainer.style.width === '') {
+                diagnosticsContainer.style.width = '500px';
+                diagnosticsContainer.style.opacity = '1';
+                videoContainer.style.flex = '1';
+                button.textContent = 'Hide Diagnostics';
+            } else {
+                diagnosticsContainer.style.width = '0';
+                diagnosticsContainer.style.opacity = '0';
+                setTimeout(() => {
+                    videoContainer.style.flex = '2';
+                }, 300); // Match the transition duration
+                button.textContent = 'Show Diagnostics';
+            }
+        });
+    </script>
 </body>
 </html>
 

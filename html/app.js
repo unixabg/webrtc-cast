@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const connectionStatus = document.getElementById('connectionStatus');
     const toggleShareButton = document.getElementById('toggleShareButton');
     const toggleMuteButton = document.getElementById('toggleMuteButton');
+    const diagnosticsContent = document.getElementById('diagnosticsContent');
 
     const peer = new RTCPeerConnection();
 
@@ -15,22 +16,30 @@ document.addEventListener('DOMContentLoaded', function() {
     let pingPongFailure = false; // Flag to watch ping pong
     let isMuted = true; // Initially muted
     let isSharing = false; // Initially not sharing
+    let currentStream; // To hold the stream
+
+    function logToDiagnostics(message) {
+        const logEntry = document.createElement('div');
+        logEntry.textContent = message;
+        diagnosticsContent.appendChild(logEntry);
+        diagnosticsContent.scrollTop = diagnosticsContent.scrollHeight;
+    }
 
     ws.onopen = () => {
-        console.log('WebSocket connection established.');
+        logToDiagnostics('WebSocket connection established.');
         updateStatus('Connected', 'green');
         toggleShareButton.disabled = false;
         sendHeartbeat(ws);
     };
 
     ws.onerror = (event) => {
-        console.error('WebSocket Error:', event);
+        logToDiagnostics('WebSocket Error: ' + event);
         updateStatus('Connection Error', 'red');
     };
 
     ws.onclose = () => {
         stopScreenSharing();
-        console.log('WebSocket connection closed.');
+        logToDiagnostics('WebSocket connection closed.');
         updateStatus('Disconnected', 'red');
         toggleShareButton.disabled = true;
         toggleMuteButton.disabled = true;
@@ -39,11 +48,11 @@ document.addEventListener('DOMContentLoaded', function() {
     let confirmationTimeout; // Declare the timeout variable globally
     let streamPlayingConfirmed = false; // Flag to track confirmation
     ws.onmessage = function(event) {
-        console.log('WebSocket message received:', event.data);
+        logToDiagnostics('WebSocket message received: ' + event.data);
         const message = JSON.parse(event.data);
         switch (message.type) {
             case 'stream-playing':
-                console.log('Confirmation received that stream is playing on the receiver side.');
+                logToDiagnostics('Confirmation received that stream is playing on the receiver side.');
                 updateStreamingStatus('Stream is playing', 'green');
                 streamPlayingConfirmed = true; // Set the confirmation flag to true
                 clearTimeout(confirmationTimeout); // Clear the timeout
@@ -51,15 +60,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
             case 'answer':
                 peer.setRemoteDescription(new RTCSessionDescription(message.data))
-                    .then(() => console.log('Answer received. Remote description successfully set.'))
+                    .then(() => logToDiagnostics('Answer received. Remote description successfully set.'))
                     .catch(error => {
-                        console.error('Failed to set remote description:', error);
+                        logToDiagnostics('Failed to set remote description: ' + error);
                         updateStatus('SDP Error', 'red');
                     });
                 break;
             case 'pong':
                 pingPongFailure = false;
-                console.log('Clearing pong confirmationTimeout');
+                logToDiagnostics('Clearing pong confirmationTimeout');
                 clearTimeout(confirmationTimeout); // Cancel the timeout if pong response is received
                 break;
         }
@@ -67,7 +76,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     peer.ontrack = event => {
         video.srcObject = event.streams[0];
-        console.log('Stream added to local video.');
+        logToDiagnostics('Stream added to local video.');
     };
 
     function updateStatus(text, color) {
@@ -75,19 +84,25 @@ document.addEventListener('DOMContentLoaded', function() {
         connectionStatus.style.color = color;
     }
 
+    function updateStreamingStatus(text, color) {
+        const streamingStatus = document.getElementById('streamingStatus');
+        streamingStatus.textContent = `● ${text}`;
+        streamingStatus.style.color = color;
+    }
+
     // Heartbeat function to ensure the WebSocket connection is alive
     function sendHeartbeat(ws) {
         setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'ping' }));
-                console.log('Sent ping to listening server');
+                logToDiagnostics('Sent ping to listening server');
                 confirmationTimeout = setTimeout(() => {
-                    console.log('Pong response timed out. Assuming connection lost.');
+                    logToDiagnostics('Pong response timed out. Assuming connection lost.');
                     pingPongFailure = true;
                     stopScreenSharing(); // Stop sharing the stream
                 }, 10000); // 10 seconds
             } else {
-                console.log('Connection not open, cannot send heartbeat');
+                logToDiagnostics('Connection not open, cannot send heartbeat');
             }
         }, 5000); // Send heartbeat every 5 seconds
     }
@@ -102,27 +117,21 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     toggleMuteButton.addEventListener('click', () => {
-        console.log(`${isMuted ? 'Unmute' : 'Mute'} button clicked.`);
+        logToDiagnostics(`${isMuted ? 'Unmute' : 'Mute'} button clicked.`);
         ws.send(JSON.stringify({ type: isMuted ? 'unmute-audio' : 'mute-audio' }));
         isMuted = !isMuted;
         toggleMuteButton.textContent = isMuted ? 'Unmute Audio' : 'Mute Audio';
     });
-
-    function updateStreamingStatus(text, color) {
-        const streamingStatus = document.getElementById('streamingStatus');
-        streamingStatus.textContent = `● ${text}`;
-        streamingStatus.style.color = color;
-    }
 
     function startScreenSharing(retryCount = 0) {
         const maxRetries = 3; // Maximum number of retries
 
         function handleRetryOrFailure() {
             if (retryCount < maxRetries) {
-                console.log(`Retry ${retryCount + 1} of ${maxRetries}`);
+                logToDiagnostics(`Retry ${retryCount + 1} of ${maxRetries}`);
                 startScreenSharing(retryCount + 1); // Retry the process
             } else {
-                console.error('Maximum retries reached. Stopping attempts.');
+                logToDiagnostics('Maximum retries reached. Stopping attempts.');
                 updateStreamingStatus('Streaming failed', 'red');
             }
         }
@@ -137,16 +146,16 @@ document.addEventListener('DOMContentLoaded', function() {
             peer.createOffer().then(offer => {
                 return peer.setLocalDescription(offer);
             }).then(() => {
-                console.log('Sending offer:', peer.localDescription);
+                logToDiagnostics('Sending offer: ' + peer.localDescription);
                 ws.send(JSON.stringify({ type: 'offer', data: peer.localDescription }));
                 setTimeout(() => {
                     if (!streamPlayingConfirmed) {
-                        console.error('No confirmation for stream playing received.');
+                        logToDiagnostics('No confirmation for stream playing received.');
                         handleRetryOrFailure();
                     }
                 }, 5000); // Timeout set for 5 seconds
             }).catch(error => {
-                console.error('Error during offer creation or sending:', error);
+                logToDiagnostics('Error during offer creation or sending: ' + error);
                 handleRetryOrFailure();
             });
         }
@@ -160,7 +169,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Handle the browser UI stop action
                     stream.getTracks().forEach(track => {
                         track.onended = () => {
-                            console.log('User has stopped sharing through the browser UI.');
+                            logToDiagnostics('User has stopped sharing through the browser UI.');
                             handleTrackEnd(); // Handle as if the stop button was clicked
                         };
                     });
@@ -168,18 +177,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     sendOffer(stream, retryCount);
                 })
                 .catch(error => {
-                    console.error('Error obtaining display media:', error);
+                    logToDiagnostics('Error obtaining display media: ' + error);
                     updateStatus('Setup Error', 'red');
                     toggleShareButton.disabled = false;
                 });
         } else {
-            console.log(`Retry ${retryCount} of ${maxRetries}`);
+            logToDiagnostics(`Retry ${retryCount} of ${maxRetries}`);
             sendOffer(currentStream, retryCount);
         }
 
         isSharing = true;
         toggleShareButton.textContent = 'Stop Sharing';
-        toggleMuteButton.disabled = false;
+        toggleMuteButton.disabled = true; // Disable mute button until stream-playing confirmed
     }
 
     function stopScreenSharing() {
@@ -187,10 +196,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const tracks = video.srcObject.getTracks(); // Get all tracks from the stream
             tracks.forEach(track => track.stop()); // Stop each track
             video.srcObject = null; // Clear the srcObject to release the stream
-            console.log('Screen sharing stopped.');
+            logToDiagnostics('Screen sharing stopped.');
             updateStreamingStatus('Streaming stopped', 'red'); // Update streaming status on UI
         } else {
-            console.log('No stream to stop.');
+            logToDiagnostics('No stream to stop.');
         }
 
         // Reset UI components
@@ -204,7 +213,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateStreamingStatus('Please reload the page to attempt new connection', 'red');
             toggleShareButton.disabled = true;
         } else {
-            console.log('Ping Pong Good.');
+            logToDiagnostics('Ping Pong Good.');
         }
 
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
@@ -225,7 +234,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function handleTrackEnd() {
-        console.log('Handling track end: Updating UI and signaling state change.');
+        logToDiagnostics('Handling track end: Updating UI and signaling state change.');
         stopScreenSharing();
     }
 });
