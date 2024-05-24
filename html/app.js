@@ -1,13 +1,11 @@
 document.addEventListener('DOMContentLoaded', function() {
     const video = document.getElementById('localVideo');
     const connectionStatus = document.getElementById('connectionStatus');
-    const startButton = document.getElementById('startButton');
-    const stopButton = document.getElementById('stopButton');
+    const toggleShareButton = document.getElementById('toggleShareButton');
     const toggleMuteButton = document.getElementById('toggleMuteButton');
 
     const peer = new RTCPeerConnection();
 
-    // Use the current hostname to dynamically create the WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const port = window.location.port ? `:${window.location.port}` : '';
@@ -16,11 +14,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let pingPongFailure = false; // Flag to watch ping pong
     let isMuted = true; // Initially muted
+    let isSharing = false; // Initially not sharing
 
     ws.onopen = () => {
         console.log('WebSocket connection established.');
         updateStatus('Connected', 'green');
-        startButton.disabled = false;
+        toggleShareButton.disabled = false;
         sendHeartbeat(ws);
     };
 
@@ -33,8 +32,7 @@ document.addEventListener('DOMContentLoaded', function() {
         stopScreenSharing();
         console.log('WebSocket connection closed.');
         updateStatus('Disconnected', 'red');
-        startButton.disabled = true;
-        stopButton.disabled = true;
+        toggleShareButton.disabled = true;
         toggleMuteButton.disabled = true;
     };
 
@@ -95,14 +93,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Event listeners for buttons
-    startButton.addEventListener('click', () => {
-        startScreenSharing();
-        startButton.disabled = true;
-        stopButton.disabled = false;
-    });
-
-    stopButton.addEventListener('click', () => {
-        stopScreenSharing();
+    toggleShareButton.addEventListener('click', () => {
+        if (isSharing) {
+            stopScreenSharing();
+        } else {
+            startScreenSharing();
+        }
     });
 
     toggleMuteButton.addEventListener('click', () => {
@@ -174,17 +170,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 .catch(error => {
                     console.error('Error obtaining display media:', error);
                     updateStatus('Setup Error', 'red');
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
+                    toggleShareButton.disabled = false;
                 });
         } else {
             console.log(`Retry ${retryCount} of ${maxRetries}`);
             sendOffer(currentStream, retryCount);
         }
+
+        isSharing = true;
+        toggleShareButton.textContent = 'Stop Sharing';
+        toggleMuteButton.disabled = false;
     }
 
     function stopScreenSharing() {
-        // Ensure that the video's srcObject is not null before trying to stop the tracks
         if (video.srcObject) {
             const tracks = video.srcObject.getTracks(); // Get all tracks from the stream
             tracks.forEach(track => track.stop()); // Stop each track
@@ -196,31 +194,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Reset UI components
-        startButton.disabled = false;
-        stopButton.disabled = true;
+        isSharing = false;
+        toggleShareButton.textContent = 'Start Sharing';
+        toggleShareButton.disabled = false;
         toggleMuteButton.disabled = true;
 
         if (pingPongFailure) {
             updateStatus('Network Error', 'red');
             updateStreamingStatus('Please reload the page to attempt new connection', 'red');
-            startButton.disabled = true;
-            stopButton.disabled = true;
+            toggleShareButton.disabled = true;
         } else {
             console.log('Ping Pong Good.');
         }
 
-        // Send message to the server indicating that the streaming has stopped
         ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Client has stopped the screen sharing.' }));
 
-        // Optionally reset the streamPlayingConfirmed flag if you want to ensure clean state for next start
         streamPlayingConfirmed = false;
 
-        // Send message to the server to refresh the page
-        console.error('Stop screen sharing requesting a page refresh to encourage the listening-chrome.html to listen better.');
         ws.send(JSON.stringify({ type: 'listening-refresh', data: 'Stop screen sharing requesting a page refresh on a retry share attempt.' }));
+
         updateStreamingStatus('Streaming stopped. Page will reload...', 'red'); // Update streaming status on UI
 
-        // Clear any ongoing confirmation timeouts to prevent them from firing after stopping
         if (confirmationTimeout) {
             clearTimeout(confirmationTimeout);
             confirmationTimeout = null;
@@ -232,10 +226,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleTrackEnd() {
         console.log('Handling track end: Updating UI and signaling state change.');
-        document.getElementById('startButton').disabled = false;
-        document.getElementById('stopButton').disabled = true;
         stopScreenSharing();
     }
-
 });
 
