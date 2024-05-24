@@ -11,12 +11,6 @@
             flex-direction: column;
             align-items: center;
         }
-        .status-container {
-            width: 100%;
-            max-width: 640px;
-            text-align: left;
-            margin-top: 10px;
-        }
         .container {
             display: flex;
             width: 80%;
@@ -24,13 +18,26 @@
             margin-top: 20px;
             transition: width 0.3s ease;
         }
-        .video-container {
+        .left-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             flex: 1;
+        }
+        .status-container {
+            width: 100%;
+            max-width: 640px;
+            text-align: left;
+            margin-top: 10px;
+        }
+        .video-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             padding: 10px;
             transition: flex 0.3s ease;
+            width: 100%;
+            max-width: 640px;
         }
         .button-container {
             display: flex;
@@ -70,18 +77,19 @@
 <body>
     <h1>WebRTC Screen Sharing Client</h1>
 
-    <div class="status-container">
-        <div id="connectionStatus" style="color: blue;">● Waiting for connection...</div>
-        <div id="streamingStatus" style="color: blue;">● Streaming is inactive</div>
-    </div>
-
     <div class="container">
-        <div class="video-container">
-            <video id="localVideo" autoplay playsinline controls muted style="width: 100%; max-width: 640px; height: auto; border: 1px solid grey;"></video>
-            <div class="button-container">
-                <button id="toggleShareButton" disabled>Start Sharing</button>
-                <button id="toggleMuteButton" disabled>Unmute Audio</button>
-                <button class="toggle-button" id="toggleDiagnosticsButton">Show Diagnostics</button>
+        <div class="left-container">
+            <div class="status-container">
+                <div id="connectionStatus" style="color: blue;">● Waiting for connection...</div>
+                <div id="streamingStatus" style="color: blue;">● Streaming is inactive</div>
+            </div>
+            <div class="video-container">
+                <video id="localVideo" autoplay playsinline controls muted style="width: 100%; height: auto; border: 1px solid grey;"></video>
+                <div class="button-container">
+                    <button id="toggleShareButton" disabled>Start Sharing</button>
+                    <button id="toggleMuteButton" disabled>Unmute Audio</button>
+                    <button class="toggle-button" id="toggleDiagnosticsButton">Show Diagnostics</button>
+                </div>
             </div>
         </div>
         <div class="diagnostics-container" id="diagnosticsContainer">
@@ -93,19 +101,19 @@
     <script>
         document.getElementById('toggleDiagnosticsButton').addEventListener('click', function() {
             const diagnosticsContainer = document.getElementById('diagnosticsContainer');
-            const videoContainer = document.querySelector('.video-container');
+            const leftContainer = document.querySelector('.left-container');
             const button = document.getElementById('toggleDiagnosticsButton');
-
+            
             if (diagnosticsContainer.style.width === '0px' || diagnosticsContainer.style.width === '') {
                 diagnosticsContainer.style.width = '500px';
                 diagnosticsContainer.style.opacity = '1';
-                videoContainer.style.flex = '1';
+                leftContainer.style.flex = '1';
                 button.textContent = 'Hide Diagnostics';
             } else {
                 diagnosticsContainer.style.width = '0';
                 diagnosticsContainer.style.opacity = '0';
                 setTimeout(() => {
-                    videoContainer.style.flex = '2';
+                    leftContainer.style.flex = '2';
                 }, 300); // Match the transition duration
                 button.textContent = 'Show Diagnostics';
             }
