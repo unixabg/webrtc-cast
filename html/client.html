@@ -55,6 +55,11 @@
             opacity: 0;
             transition: width 0.3s ease, opacity 0.3s ease;
         }
+        .diagnostics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
         .diagnostics-content {
             height: 500px;
             overflow-y: scroll;
@@ -64,7 +69,7 @@
             font-size: 12px;
             line-height: 1.5;
         }
-        .toggle-button {
+        .toggle-button, .copy-button, .clear-button {
             cursor: pointer;
             background-color: #ddd;
             padding: 10px;
@@ -93,6 +98,13 @@
             </div>
         </div>
         <div class="diagnostics-container" id="diagnosticsContainer">
+            <div class="diagnostics-header">
+                <span>Diagnosis</span>
+                <div>
+                    <button class="copy-button" id="copyDiagnosticsButton">Copy</button>
+                    <button class="clear-button" id="clearDiagnosticsButton">Clear</button>
+                </div>
+            </div>
             <div class="diagnostics-content" id="diagnosticsContent"></div>
         </div>
     </div>
@@ -117,6 +129,20 @@
                 }, 300); // Match the transition duration
                 button.textContent = 'Show Diagnostics';
             }
+        });
+
+        document.getElementById('copyDiagnosticsButton').addEventListener('click', function() {
+            const diagnosticsContent = document.getElementById('diagnosticsContent').innerText;
+            navigator.clipboard.writeText(diagnosticsContent).then(() => {
+                alert('Diagnostics copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy diagnostics: ', err);
+            });
+        });
+
+        document.getElementById('clearDiagnosticsButton').addEventListener('click', function() {
+            const diagnosticsContent = document.getElementById('diagnosticsContent');
+            diagnosticsContent.innerHTML = '';
         });
     </script>
 </body>
