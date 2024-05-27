@@ -68,7 +68,7 @@
             const statusText = document.getElementById('statusText');
             const knownTracks = new Set();
 
-            const ws = new WebSocket('wss://ws-server:8080');
+            const ws = new WebSocket('wss://localhost:8080');
             const peer = new RTCPeerConnection();
 
             let isPlaying = false; // Flag to manage play state
