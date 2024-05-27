@@ -285,6 +285,6 @@ function distributeMessage(data, ws) {
 
 // Start the HTTPS server
 httpsServer.listen(8080, () => {
-    console.log('HTTP and WebSocket server started on http://localhost:8080');
+    console.log('HTTP and WebSocket server started on https://localhost:8080');
 });
 
