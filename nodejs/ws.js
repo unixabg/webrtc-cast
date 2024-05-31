@@ -20,62 +20,8 @@ const httpsServer = https.createServer(serverOptions, (req, res) => {
     console.log('Base url is: ', url);
 
     if (url === '/setup') {
-        const html = `
-        <html>
-            <body>
-                <h1>WebRTC-Cast Setup</h1>
-                <table>
-                    <tr>
-                        <td>
-                            <h2>Station WiFi</h2>
-                            <form action="/setup-wifi" method="get">
-                                <label for="ssid">SSID:</label>
-                                <input type="text" id="ssid" name="ssid"><br><br>
-                                <label for="psk">PSK:</label>
-                                <input type="password" id="psk" name="psk"><br><br>
-                                <input type="submit" value="Submit">
-                            </form>
-                        </td>
-                        <td>
-                            <h2>AP WiFi</h2>
-                            <form action="/setup-ap" method="get">
-                                <label for="ap_ssid">SSID:</label>
-                                <input type="text" id="ap_ssid" name="ap_ssid"><br><br>
-                                <label for="ap_psk">PSK:</label>
-                                <input type="password" id="ap_psk" name="ap_psk"><br><br>
-                                <input type="submit" value="Submit">
-                            </form>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
-                        </td>
-                        <td>
-                            <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
-                        </td>
-                    </tr>
-                </table>
-                <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
-                <script>
-                    function fetchNetworkInfo() {
-                        fetch('/network-info')
-                            .then(response => response.text())
-                            .then(data => {
-                                const networkInfoElement = document.getElementById('networkInfo');
-                                networkInfoElement.textContent = data;
-                                networkInfoElement.style.display = 'block';
-                            })
-                            .catch(error => {
-                                console.error('Error fetching network info:', error);
-                            });
-                    }
-                </script>
-            </body>
-        </html>
-        `;
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(html);
+        res.end(fs.readFileSync('./html/setup.html', 'utf8'));
     } else if (url === '/network-info') {
         exec('ip a', (error, stdout, stderr) => {
             if (error) {
@@ -112,7 +58,7 @@ EOF`, (error, stdout, stderr) => {
                     </head>
                     <body>
                         <h1>Station WiFi setup successful!</h1>
-                        <h2>Reboot to apply the settings!</h1>
+                        <h2>Reboot to apply the settings!</h2>
                     </body>
                 </html>
                 `;
@@ -141,7 +87,7 @@ EOF`, (error, stdout, stderr) => {
                     </head>
                     <body>
                         <h1>AP WiFi setup successful!</h1>
-                        <h2>Reboot to apply the settings!</h1>
+                        <h2>Reboot to apply the settings!</h2>
                     </body>
                 </html>
                 `;
@@ -158,7 +104,7 @@ EOF`, (error, stdout, stderr) => {
                 <meta http-equiv="refresh" content="1; URL='/'" />
             </head>
             <body>
-                <h2>Rebooting WebRTC-Cast!</h1>
+                <h2>Rebooting WebRTC-Cast!</h2>
             </body>
         </html>
         `;
@@ -263,7 +209,7 @@ function handleClientMessage(data, ws) {
             console.log('Unmute audio signal received.');
             distributeMessage(data, ws);
             break;
-         case 'mute-audio':
+        case 'mute-audio':
             console.log('Mute audio signal received.');
             distributeMessage(data, ws);
             break;

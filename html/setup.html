@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC-Cast Setup</title>
+</head>
+<body>
+    <h1>WebRTC-Cast Setup</h1>
+    <table>
+        <tr>
+            <td>
+                <h2>Station WiFi</h2>
+                <form action="/setup-wifi" method="get">
+                    <label for="ssid">SSID:</label>
+                    <input type="text" id="ssid" name="ssid"><br><br>
+                    <label for="psk">PSK:</label>
+                    <input type="password" id="psk" name="psk"><br><br>
+                    <input type="submit" value="Submit">
+                </form>
+            </td>
+            <td>
+                <h2>AP WiFi</h2>
+                <form action="/setup-ap" method="get">
+                    <label for="ap_ssid">SSID:</label>
+                    <input type="text" id="ap_ssid" name="ap_ssid"><br><br>
+                    <label for="ap_psk">PSK:</label>
+                    <input type="password" id="ap_psk" name="ap_psk"><br><br>
+                    <input type="submit" value="Submit">
+                </form>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
+            </td>
+            <td>
+                <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
+            </td>
+        </tr>
+    </table>
+    <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
+    <script>
+        function fetchNetworkInfo() {
+            fetch('/network-info')
+                .then(response => response.text())
+                .then(data => {
+                    const networkInfoElement = document.getElementById('networkInfo');
+                    networkInfoElement.textContent = data;
+                    networkInfoElement.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error fetching network info:', error);
+                });
+        }
+    </script>
+</body>
+</html>
+
