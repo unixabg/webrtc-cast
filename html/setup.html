@@ -31,16 +31,33 @@
             </td>
         </tr>
         <tr>
-            <td>
-                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
+            <td colspan="2">
+                <h2>Network Test URL</h2>
+                <form id="network-test-form" action="/save-network-test-url" method="post">
+                    <label for="networkTestUrl">Test URL:</label>
+                    <input type="url" id="networkTestUrl" name="networkTestUrl" placeholder="https://www.google.com" style="width: 90%;"><br><br>
+                    <input type="submit" value="Save URL">
+                </form>
             </td>
-            <td>
+        </tr>
+        <tr>
+            <td colspan="2" style="text-align: center;">
+                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
             </td>
         </tr>
     </table>
     <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/get-network-test-url')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('networkTestUrl').value = data;
+                })
+                .catch(error => console.error('Error fetching network test URL:', error));
+        });
+
         function fetchNetworkInfo() {
             fetch('/network-info')
                 .then(response => response.text())

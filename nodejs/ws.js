@@ -2,136 +2,102 @@ const fs = require('fs');
 const https = require('https');
 const WebSocket = require('ws');
 const { exec } = require('child_process');
+const path = require('path');
+const express = require('express');
 
-// Load SSL certificate and private key from file system
+const app = express();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
+
 const serverOptions = {
-    cert: fs.readFileSync('cert.pem'),
-    key: fs.readFileSync('key.pem')
+    cert: fs.readFileSync(path.join(__dirname, '../cert.pem')), // Read cert from ./ directory
+    key: fs.readFileSync(path.join(__dirname, '../key.pem')) // Read key from ./ directory
 };
 
 // Create an HTTPS server for serving HTML files
-const httpsServer = https.createServer(serverOptions, (req, res) => {
-    console.log(`Received request for: ${req.url}`);
-    // Access query params using req.query directly (Express-like approach)
-    const queryParams = new URLSearchParams(req.url.split('?')[1]);
-    const url = req.url.split('?')[0];
+const httpsServer = https.createServer(serverOptions, app);
 
-    console.log('Full url is ', req.url);
-    console.log('Base url is: ', url);
+// Serve client.html at the root URL
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../html/client.html'));
+});
 
-    if (url === '/setup') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(fs.readFileSync('./html/setup.html', 'utf8'));
-    } else if (url === '/network-info') {
-        exec('ip a', (error, stdout, stderr) => {
-            if (error) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end(`Error: ${error.message}`);
-                console.log(`Error: ${error.message}`);
-            } else {
-                res.writeHead(200, { 'Content-Type': 'text/plain' });
-                res.end(stdout);
-            }
-        });
-    } else if (url === '/setup-wifi') {
-        // Set specific query params
-        const ssid = queryParams.get('ssid');
-        const psk = queryParams.get('psk');
-        console.log(`Station Params: ${ssid} and ${psk}`);
+app.get('/setup', (req, res) => {
+    res.sendFile(path.join(__dirname, '../html/setup.html'));
+});
 
-        // Write the Wi-Fi configuration to the file
-        exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
+app.get('/network-info', (req, res) => {
+    exec('ip a', (error, stdout, stderr) => {
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+        } else {
+            res.send(stdout);
+        }
+    });
+});
+
+app.post('/save-network-test-url', (req, res) => {
+    const url = req.body.networkTestUrl || 'https://www.google.com';
+    fs.writeFileSync(NETWORK_TEST_URL_FILE, url);
+    res.send('<html><body><h1>Network Test URL saved!</h1><a href="/setup">Go back</a></body></html>');
+});
+
+app.get('/get-network-test-url', (req, res) => {
+    if (fs.existsSync(NETWORK_TEST_URL_FILE)) {
+        const url = fs.readFileSync(NETWORK_TEST_URL_FILE, 'utf8');
+        res.send(url);
+    } else {
+        res.send('https://www.google.com');
+    }
+});
+
+app.get('/setup-wifi', (req, res) => {
+    const ssid = req.query.ssid;
+    const psk = req.query.psk;
+    console.log(`Station Params: ${ssid} and ${psk}`);
+    exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
 allow-hotplug wlan0
 iface wlan0 inet dhcp
 wpa-ssid ${ssid}
 wpa-psk ${psk}
 EOF`, (error, stdout, stderr) => {
-            if (error) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end(`Error: ${error.message}`);
-                console.log(`Error: ${error.message}`);
-            } else {
-                const html = `
-                <html>
-                    <head>
-                        <meta http-equiv="refresh" content="3; URL='/setup'" />
-                    </head>
-                    <body>
-                        <h1>Station WiFi setup successful!</h1>
-                        <h2>Reboot to apply the settings!</h2>
-                    </body>
-                </html>
-                `;
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(html);
-                console.log('Wi-Fi configuration written successfully');
-            }
-        });
-    } else if (url === '/setup-ap') {
-        // Set specific query params
-        const ap_ssid = queryParams.get('ap_ssid');
-        const ap_psk = queryParams.get('ap_psk');
-        console.log(`AP Params: ${ap_ssid} and ${ap_psk}`);
-
-        // Write the Wi-Fi configuration to the file
-        exec(`sudo sed -i 's/^ssid=.*/ssid=${ap_ssid}/; s/^wpa_passphrase=.*/wpa_passphrase=${ap_psk}/' /etc/hostapd/hostapd.conf`, (error, stdout, stderr) => {
-            if (error) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end(`Error: ${error.message}`);
-                console.log(`Error: ${error.message}`);
-            } else {
-                const html = `
-                <html>
-                    <head>
-                        <meta http-equiv="refresh" content="3; URL='/setup'" />
-                    </head>
-                    <body>
-                        <h1>AP WiFi setup successful!</h1>
-                        <h2>Reboot to apply the settings!</h2>
-                    </body>
-                </html>
-                `;
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(html);
-                console.log('AP configuration written successfully');
-            }
-        });
-    } else if (url === '/reboot') {
-        // Reboot the system to apply the setting
-        const html = `
-        <html>
-            <head>
-                <meta http-equiv="refresh" content="1; URL='/'" />
-            </head>
-            <body>
-                <h2>Rebooting WebRTC-Cast!</h2>
-            </body>
-        </html>
-        `;
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(html);
-        console.log('Reboot called');
-        exec(`sudo reboot`, (error, stdout, stderr) => {
-            if (error) {
-                console.log(`Error: ${error.message}`);
-            } else {
-                console.log('Reboot called');
-            }
-        });
-    } else {
-        // Handle other URLs as before
-        if (url === '/') {
-            res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(fs.readFileSync('./html/client.html', 'utf8'));
-        } else if (url === '/app.js') {
-            res.writeHead(200, { 'Content-Type': 'application/javascript' });
-            res.end(fs.readFileSync('./html/app.js', 'utf8'));
-        } else if (url === '/listening-chrome.html') {
-            res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(fs.readFileSync('./html/listening-chrome.html', 'utf8'));
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+            console.log(`Error: ${error.message}`);
+        } else {
+            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup\'" /></head><body><h1>Station WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
         }
-    }
+    });
 });
+
+app.get('/setup-ap', (req, res) => {
+    const ap_ssid = req.query.ap_ssid;
+    const ap_psk = req.query.ap_psk;
+    console.log(`AP Params: ${ap_ssid} and ${ap_psk}`);
+    exec(`sudo sed -i 's/^ssid=.*/ssid=${ap_ssid}/; s/^wpa_passphrase=.*/wpa_passphrase=${ap_psk}/' /etc/hostapd/hostapd.conf`, (error, stdout, stderr) => {
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+            console.log(`Error: ${error.message}`);
+        } else {
+            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup\'" /></head><body><h1>AP WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
+        }
+    });
+});
+
+app.get('/reboot', (req, res) => {
+    res.send('<html><head><meta http-equiv="refresh" content="1; URL=\'/\'" /></head><body><h2>Rebooting WebRTC-Cast!</h2></body></html>');
+    exec('sudo reboot', (error, stdout, stderr) => {
+        if (error) {
+            console.log(`Error: ${error.message}`);
+        } else {
+            console.log('Reboot called');
+        }
+    });
+});
+
+app.use(express.static(path.join(__dirname, '../html')));
 
 // Bind WebSocket server to HTTPS server
 const wss = new WebSocket.Server({ server: httpsServer });

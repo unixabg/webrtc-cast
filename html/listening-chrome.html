@@ -132,8 +132,21 @@
             }
 
             // Function to check internet connectivity
-            function checkInternetConnectivity() {
-                fetch('https://www.google.com', { mode: 'no-cors' })
+            async function checkInternetConnectivity() {
+                let testUrl;
+                if (location.protocol === 'file:') {
+                    // If opened as a file, read the URL from the local file
+                    testUrl = await fetch('file:///home/kiosk/webrtc-cast/network_test_url.txt')
+                        .then(response => response.text())
+                        .catch(() => 'https://www.google.com');
+                } else {
+                    // If opened via HTTP, fetch the URL from the server
+                    testUrl = await fetch('/get-network-test-url')
+                        .then(response => response.text())
+                        .catch(() => 'https://www.google.com');
+                }
+                console.log(`Using network test URL: ${testUrl}`);
+                fetch(testUrl, { mode: 'no-cors' })
                     .then(() => updateInternetStatus(true))
                     .catch(() => updateInternetStatus(false));
             }
@@ -214,11 +227,11 @@
                             console.error('Failed to resume playback after unmuting:', error);
                         });
                         break;
-                     case 'mute-audio':
+                    case 'mute-audio':
                         console.log('Mute audio signal received.');
                         remoteVideo.muted = true;
                         break;
-                 }
+                }
             };
 
             ws.onopen = () => {
