@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+</head>
+<body>
+    <h1>Login required to access the setup operations</h1>
+    <form id="loginForm">
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required>
+        <button type="submit">Login</button>
+    </form>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const password = document.getElementById('password').value;
+
+            fetch('/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ password })
+            }).then(response => response.json())
+              .then(data => {
+                  if (data.token) {
+                      window.location.href = `/setup-protected?token=${data.token}`;
+                  } else {
+                      alert('Unauthorized: You must provide the correct password.');
+                  }
+              }).catch(error => {
+                  console.error('Error:', error);
+                  alert('Unauthorized: You must provide the correct password.');
+              });
+        });
+    </script>
+</body>
+</html>
+

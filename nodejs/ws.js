@@ -4,12 +4,16 @@ const WebSocket = require('ws');
 const { exec } = require('child_process');
 const path = require('path');
 const express = require('express');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
+const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
+const TOKEN_SECRET = 'your_secret'; // Use a secret for token generation
+const validTokens = new Set(); // Store valid tokens in memory
 
 const serverOptions = {
     cert: fs.readFileSync(path.join(__dirname, '../cert.pem')), // Read cert from ./ directory
@@ -24,21 +28,42 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../html/client.html'));
 });
 
+// Middleware to check for token
+function checkToken(req, res, next) {
+    const token = req.headers['x-token'];
+    if (token && validTokens.has(token)) {
+        next();
+    } else {
+        res.status(401).send('<html><body><h1>Unauthorized</h1><p>You must provide the correct token.</p></body></html>');
+    }
+}
+
+// Serve login.html
 app.get('/setup', (req, res) => {
+    res.sendFile(path.join(__dirname, '../html/login.html'));
+});
+
+// Handle login and generate token
+app.post('/login', (req, res) => {
+    const password = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
+    const enteredPassword = req.body.password;
+
+    if (enteredPassword && enteredPassword === password) {
+        const token = crypto.randomBytes(16).toString('hex');
+        validTokens.add(token);
+        res.json({ token });
+    } else {
+        res.status(401).send('Unauthorized: You must provide the correct password.');
+    }
+});
+
+// Serve setup.html with token protection
+app.get('/setup-protected', (req, res) => {
     res.sendFile(path.join(__dirname, '../html/setup.html'));
 });
 
-app.get('/get-hostname', (req, res) => {
-    exec('hostname', (error, stdout, stderr) => {
-        if (error) {
-            res.status(500).send(`Error: ${error.message}`);
-        } else {
-            res.send(stdout.trim());
-        }
-    });
-});
-
-app.post('/set-hostname', (req, res) => {
+// Setup actions protected by token
+app.post('/set-hostname', checkToken, (req, res) => {
     const newHostname = req.body.hostname;
     exec(`sudo hostnamectl set-hostname ${newHostname}`, (error, stdout, stderr) => {
         if (error) {
@@ -49,7 +74,7 @@ app.post('/set-hostname', (req, res) => {
     });
 });
 
-app.get('/network-info', (req, res) => {
+app.get('/network-info', checkToken, (req, res) => {
     exec('ip a', (error, stdout, stderr) => {
         if (error) {
             res.status(500).send(`Error: ${error.message}`);
@@ -59,13 +84,13 @@ app.get('/network-info', (req, res) => {
     });
 });
 
-app.post('/save-network-test-url', (req, res) => {
+app.post('/save-network-test-url', checkToken, (req, res) => {
     const url = req.body.networkTestUrl || 'https://www.google.com';
     fs.writeFileSync(NETWORK_TEST_URL_FILE, url);
-    res.send('<html><body><h1>Network Test URL saved!</h1><a href="/setup">Go back</a></body></html>');
+    res.send('<html><body><h1>Network Test URL saved!</h1><a href="/setup-protected">Go back</a></body></html>');
 });
 
-app.get('/get-network-test-url', (req, res) => {
+app.get('/get-network-test-url', checkToken, (req, res) => {
     if (fs.existsSync(NETWORK_TEST_URL_FILE)) {
         const url = fs.readFileSync(NETWORK_TEST_URL_FILE, 'utf8');
         res.send(url);
@@ -74,7 +99,17 @@ app.get('/get-network-test-url', (req, res) => {
     }
 });
 
-app.get('/setup-wifi', (req, res) => {
+app.get('/get-hostname', checkToken, (req, res) => {
+    exec('hostname', (error, stdout, stderr) => {
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+        } else {
+            res.send(stdout.trim());
+        }
+    });
+});
+
+app.get('/setup-wifi', checkToken, (req, res) => {
     const ssid = req.query.ssid;
     const psk = req.query.psk;
     console.log(`Station Params: ${ssid} and ${psk}`);
@@ -88,12 +123,12 @@ EOF`, (error, stdout, stderr) => {
             res.status(500).send(`Error: ${error.message}`);
             console.log(`Error: ${error.message}`);
         } else {
-            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup\'" /></head><body><h1>Station WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
+            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup-protected\'" /></head><body><h1>Station WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
         }
     });
 });
 
-app.get('/setup-ap', (req, res) => {
+app.get('/setup-ap', checkToken, (req, res) => {
     const ap_ssid = req.query.ap_ssid;
     const ap_psk = req.query.ap_psk;
     console.log(`AP Params: ${ap_ssid} and ${ap_psk}`);
@@ -102,12 +137,12 @@ app.get('/setup-ap', (req, res) => {
             res.status(500).send(`Error: ${error.message}`);
             console.log(`Error: ${error.message}`);
         } else {
-            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup\'" /></head><body><h1>AP WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
+            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup-protected\'" /></head><body><h1>AP WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
         }
     });
 });
 
-app.get('/reboot', (req, res) => {
+app.get('/reboot', checkToken, (req, res) => {
     res.send('<html><head><meta http-equiv="refresh" content="1; URL=\'/\'" /></head><body><h2>Rebooting WebRTC-Cast!</h2></body></html>');
     exec('sudo reboot', (error, stdout, stderr) => {
         if (error) {

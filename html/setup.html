@@ -7,11 +7,11 @@
 </head>
 <body>
     <h1>WebRTC-Cast Setup</h1>
-   <table>
+    <table>
         <tr>
             <td>
                 <h2>Station WiFi</h2>
-                <form action="/setup-wifi" method="get">
+                <form id="stationWifiForm">
                     <label for="ssid">SSID:</label>
                     <input type="text" id="ssid" name="ssid"><br><br>
                     <label for="psk">PSK:</label>
@@ -21,7 +21,7 @@
             </td>
             <td>
                 <h2>AP WiFi</h2>
-                <form action="/setup-ap" method="get">
+                <form id="apWifiForm">
                     <label for="ap_ssid">SSID:</label>
                     <input type="text" id="ap_ssid" name="ap_ssid"><br><br>
                     <label for="ap_psk">PSK:</label>
@@ -33,7 +33,7 @@
         <tr>
             <td colspan="2">
                 <h2>Network Test URL</h2>
-                <form id="network-test-form" action="/save-network-test-url" method="post">
+                <form id="networkTestForm">
                     <label for="networkTestUrl">Test URL:</label>
                     <input type="url" id="networkTestUrl" name="networkTestUrl" placeholder="https://www.google.com" style="width: 80%;"><br><br>
                     <input type="submit" value="Save URL">
@@ -48,31 +48,55 @@
                     <input type="text" id="hostname" name="hostname" style="width: 70%;" required><br><br>
                     <input type="submit" value="Set Hostname">
                 </form>
-             </td>
+            </td>
         </tr>
         <tr>
             <td colspan="2" style="text-align: center;">
-                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="location.href='/reboot'">Reboot</button>
+                <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="reboot()">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
             </td>
         </tr>
     </table>
     <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            fetch('/get-network-test-url')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('networkTestUrl').value = data;
-                })
-                .catch(error => console.error('Error fetching network test URL:', error));
+        const token = new URLSearchParams(window.location.search).get('token');
+        if (!token) {
+            alert('Unauthorized: No token found.');
+            window.location.href = '/setup';
+        }
 
-            fetch('/get-hostname')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('currentHostname').textContent = data;
-                })
-                .catch(error => console.error('Error fetching hostname:', error));
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/get-network-test-url', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.getElementById('networkTestUrl').value = data;
+            })
+            .catch(error => console.error('Error fetching network test URL:', error));
+
+            fetch('/get-hostname', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.getElementById('currentHostname').textContent = data;
+            })
+            .catch(error => console.error('Error fetching hostname:', error));
         });
 
         document.getElementById('setHostnameForm').addEventListener('submit', function(event) {
@@ -81,11 +105,17 @@
             fetch('/set-hostname', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'x-token': token
                 },
                 body: JSON.stringify({ hostname })
             })
-            .then(response => response.text())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
             .then(data => {
                 alert(data);
                 document.getElementById('currentHostname').textContent = hostname;
@@ -93,17 +123,109 @@
             .catch(error => console.error('Error setting hostname:', error));
         });
 
+        document.getElementById('stationWifiForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const ssid = document.getElementById('ssid').value;
+            const psk = document.getElementById('psk').value;
+            fetch(`/setup-wifi?ssid=${encodeURIComponent(ssid)}&psk=${encodeURIComponent(psk)}`, {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.body.innerHTML = data;
+            })
+            .catch(error => console.error('Error setting up station WiFi:', error));
+        });
+
+        document.getElementById('apWifiForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const ssid = document.getElementById('ap_ssid').value;
+            const psk = document.getElementById('ap_psk').value;
+            fetch(`/setup-ap?ap_ssid=${encodeURIComponent(ssid)}&ap_psk=${encodeURIComponent(psk)}`, {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.body.innerHTML = data;
+            })
+            .catch(error => console.error('Error setting up AP WiFi:', error));
+        });
+
+        document.getElementById('networkTestForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const networkTestUrl = document.getElementById('networkTestUrl').value;
+            fetch('/save-network-test-url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-token': token
+                },
+                body: JSON.stringify({ networkTestUrl })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.body.innerHTML = data;
+            })
+            .catch(error => console.error('Error saving network test URL:', error));
+        });
+
         function fetchNetworkInfo() {
-            fetch('/network-info')
-                .then(response => response.text())
-                .then(data => {
-                    const networkInfoElement = document.getElementById('networkInfo');
-                    networkInfoElement.textContent = data;
-                    networkInfoElement.style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('Error fetching network info:', error);
-                });
+            fetch('/network-info', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                const networkInfoElement = document.getElementById('networkInfo');
+                networkInfoElement.textContent = data;
+                networkInfoElement.style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error fetching network info:', error);
+            });
+        }
+
+        function reboot() {
+            fetch('/reboot', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                document.body.innerHTML = data;
+            })
+            .catch(error => console.error('Error rebooting:', error));
         }
     </script>
 </body>
