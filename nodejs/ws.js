@@ -51,20 +51,24 @@ app.post('/login', (req, res) => {
     if (enteredPassword && enteredPassword === password) {
         const token = crypto.randomBytes(16).toString('hex');
         validTokens.add(token);
+        console.log('Login successful, token generated');
         res.json({ token });
     } else {
+        console.log('Login failed');
         res.status(401).send('Unauthorized: You must provide the correct password.');
     }
 });
 
 // Serve setup.html with token protection
 app.get('/setup-protected', (req, res) => {
+    console.log('Accessing setup-protected page');
     res.sendFile(path.join(__dirname, '../html/setup.html'));
 });
 
 // Setup actions protected by token
 app.post('/set-hostname', checkToken, (req, res) => {
     const newHostname = req.body.hostname;
+    console.log(`Setting new hostname to: ${newHostname}`);
     exec(`sudo hostnamectl set-hostname ${newHostname}`, (error, stdout, stderr) => {
         if (error) {
             res.status(500).send(`Error: ${error.message}`);
@@ -87,7 +91,8 @@ app.get('/network-info', checkToken, (req, res) => {
 app.post('/save-network-test-url', checkToken, (req, res) => {
     const url = req.body.networkTestUrl || 'https://www.google.com';
     fs.writeFileSync(NETWORK_TEST_URL_FILE, url);
-    res.send('<html><body><h1>Network Test URL saved!</h1><a href="/setup-protected">Go back</a></body></html>');
+    console.log(`Network Test URL set to: ${url}`);
+    res.send('Network Test URL saved successfully!');
 });
 
 app.get('/get-network-test-url', checkToken, (req, res) => {
@@ -112,7 +117,7 @@ app.get('/get-hostname', checkToken, (req, res) => {
 app.get('/setup-wifi', checkToken, (req, res) => {
     const ssid = req.query.ssid;
     const psk = req.query.psk;
-    console.log(`Station Params: ${ssid} and ${psk}`);
+    console.log(`Setting up Station WiFi with SSID: ${ssid}`);
     exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
 allow-hotplug wlan0
 iface wlan0 inet dhcp
@@ -120,10 +125,10 @@ wpa-ssid ${ssid}
 wpa-psk ${psk}
 EOF`, (error, stdout, stderr) => {
         if (error) {
-            res.status(500).send(`Error: ${error.message}`);
-            console.log(`Error: ${error.message}`);
+            res.status(500).send(`Error setting up station WiFi: ${error.message}`);
+            console.log(`Error setting up station WiFi: ${error.message}`);
         } else {
-            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup-protected\'" /></head><body><h1>Station WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
+            res.send('Station WiFi setup successful!');
         }
     });
 });
@@ -131,18 +136,19 @@ EOF`, (error, stdout, stderr) => {
 app.get('/setup-ap', checkToken, (req, res) => {
     const ap_ssid = req.query.ap_ssid;
     const ap_psk = req.query.ap_psk;
-    console.log(`AP Params: ${ap_ssid} and ${ap_psk}`);
+    console.log(`Setting up AP WiFi with SSID: ${ap_ssid}`);
     exec(`sudo sed -i 's/^ssid=.*/ssid=${ap_ssid}/; s/^wpa_passphrase=.*/wpa_passphrase=${ap_psk}/' /etc/hostapd/hostapd.conf`, (error, stdout, stderr) => {
         if (error) {
-            res.status(500).send(`Error: ${error.message}`);
-            console.log(`Error: ${error.message}`);
+            res.status(500).send(`Error setting up AP WiFi: ${error.message}`);
+            console.log(`Error setting up AP WiFi: ${error.message}`);
         } else {
-            res.send('<html><head><meta http-equiv="refresh" content="3; URL=\'/setup-protected\'" /></head><body><h1>AP WiFi setup successful!</h1><h2>Reboot to apply the settings!</h2></body></html>');
+            res.send('AP WiFi setup successful!');
         }
     });
 });
 
 app.get('/reboot', checkToken, (req, res) => {
+    console.log('Rebooting WebRTC-Cast');
     res.send('<html><head><meta http-equiv="refresh" content="1; URL=\'/\'" /></head><body><h2>Rebooting WebRTC-Cast!</h2></body></html>');
     exec('sudo reboot', (error, stdout, stderr) => {
         if (error) {

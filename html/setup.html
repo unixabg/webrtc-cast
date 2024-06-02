@@ -134,14 +134,14 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    return response.text().then(text => { throw new Error(text); });
                 }
                 return response.text();
             })
             .then(data => {
-                document.body.innerHTML = data;
+                alert(data);
             })
-            .catch(error => console.error('Error setting up station WiFi:', error));
+            .catch(error => alert(`Error: ${error.message}`));
         });
 
         document.getElementById('apWifiForm').addEventListener('submit', function(event) {
@@ -155,14 +155,14 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    return response.text().then(text => { throw new Error(text); });
                 }
                 return response.text();
             })
             .then(data => {
-                document.body.innerHTML = data;
+                alert(data);
             })
-            .catch(error => console.error('Error setting up AP WiFi:', error));
+            .catch(error => alert(`Error: ${error.message}`));
         });
 
         document.getElementById('networkTestForm').addEventListener('submit', function(event) {
@@ -178,14 +178,14 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    return response.text().then(text => { throw new Error(text); });
                 }
                 return response.text();
             })
             .then(data => {
-                document.body.innerHTML = data;
+                alert('Network Test URL saved successfully!');
             })
-            .catch(error => console.error('Error saving network test URL:', error));
+            .catch(error => alert(`Error: ${error.message}`));
         });
 
         function fetchNetworkInfo() {
