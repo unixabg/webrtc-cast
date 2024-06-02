@@ -5,6 +5,7 @@ Use WebRTC to cast chrome
 * Linux
     * Tested with Debian and PiOS
 * nodejs, npm, git, and chromium
+* npm install express
 ### Notes
 * Clone the project.
 * Move to the cloned directory: `cd webrtc-cast`
