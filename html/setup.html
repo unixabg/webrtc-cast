@@ -7,7 +7,7 @@
 </head>
 <body>
     <h1>WebRTC-Cast Setup</h1>
-    <table>
+   <table>
         <tr>
             <td>
                 <h2>Station WiFi</h2>
@@ -35,10 +35,20 @@
                 <h2>Network Test URL</h2>
                 <form id="network-test-form" action="/save-network-test-url" method="post">
                     <label for="networkTestUrl">Test URL:</label>
-                    <input type="url" id="networkTestUrl" name="networkTestUrl" placeholder="https://www.google.com" style="width: 90%;"><br><br>
+                    <input type="url" id="networkTestUrl" name="networkTestUrl" placeholder="https://www.google.com" style="width: 80%;"><br><br>
                     <input type="submit" value="Save URL">
                 </form>
             </td>
+        </tr>
+        <tr>
+            <td colspan="2">
+                <h2>Current Hostname: <span id="currentHostname"></span></h2>
+                <form id="setHostnameForm">
+                    <label for="hostname">New Hostname:</label>
+                    <input type="text" id="hostname" name="hostname" style="width: 70%;" required><br><br>
+                    <input type="submit" value="Set Hostname">
+                </form>
+             </td>
         </tr>
         <tr>
             <td colspan="2" style="text-align: center;">
@@ -56,6 +66,31 @@
                     document.getElementById('networkTestUrl').value = data;
                 })
                 .catch(error => console.error('Error fetching network test URL:', error));
+
+            fetch('/get-hostname')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('currentHostname').textContent = data;
+                })
+                .catch(error => console.error('Error fetching hostname:', error));
+        });
+
+        document.getElementById('setHostnameForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const hostname = document.getElementById('hostname').value;
+            fetch('/set-hostname', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ hostname })
+            })
+            .then(response => response.text())
+            .then(data => {
+                alert(data);
+                document.getElementById('currentHostname').textContent = hostname;
+            })
+            .catch(error => console.error('Error setting hostname:', error));
         });
 
         function fetchNetworkInfo() {

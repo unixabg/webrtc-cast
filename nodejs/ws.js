@@ -28,6 +28,27 @@ app.get('/setup', (req, res) => {
     res.sendFile(path.join(__dirname, '../html/setup.html'));
 });
 
+app.get('/get-hostname', (req, res) => {
+    exec('hostname', (error, stdout, stderr) => {
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+        } else {
+            res.send(stdout.trim());
+        }
+    });
+});
+
+app.post('/set-hostname', (req, res) => {
+    const newHostname = req.body.hostname;
+    exec(`sudo hostnamectl set-hostname ${newHostname}`, (error, stdout, stderr) => {
+        if (error) {
+            res.status(500).send(`Error: ${error.message}`);
+        } else {
+            res.send(`Hostname set to ${newHostname}`);
+        }
+    });
+});
+
 app.get('/network-info', (req, res) => {
     exec('ip a', (error, stdout, stderr) => {
         if (error) {
