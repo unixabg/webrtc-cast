@@ -60,12 +60,30 @@
     <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
     <script>
         const token = new URLSearchParams(window.location.search).get('token');
-        if (!token) {
-            alert('Unauthorized: No token found.');
-            window.location.href = '/setup';
+        
+        function checkTokenValidity() {
+            return fetch('/check-token', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Invalid token');
+                }
+                return response.json();
+            })
+            .then(data => data.valid)
+            .catch(() => false);
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        async function initialize() {
+            if (!token || !(await checkTokenValidity())) {
+                alert('Unauthorized: No token found or token is invalid.');
+                window.location.href = '/setup';
+                return;
+            }
+
             fetch('/get-network-test-url', {
                 headers: {
                     'x-token': token
@@ -97,7 +115,9 @@
                 document.getElementById('currentHostname').textContent = data;
             })
             .catch(error => console.error('Error fetching hostname:', error));
-        });
+        }
+
+        document.addEventListener('DOMContentLoaded', initialize);
 
         document.getElementById('setHostnameForm').addEventListener('submit', function(event) {
             event.preventDefault();

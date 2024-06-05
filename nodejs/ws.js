@@ -59,6 +59,16 @@ app.post('/login', (req, res) => {
     }
 });
 
+// Check token validity
+app.get('/check-token', (req, res) => {
+    const token = req.headers['x-token'];
+    if (token && validTokens.has(token)) {
+        res.json({ valid: true });
+    } else {
+        res.status(401).json({ valid: false });
+    }
+});
+
 // Serve setup.html with token protection
 app.get('/setup-protected', (req, res) => {
     console.log('Accessing setup-protected page');
