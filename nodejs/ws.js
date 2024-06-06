@@ -88,7 +88,8 @@ app.post('/set-hostname', checkToken, (req, res) => {
     });
 });
 
-app.get('/network-info', checkToken, (req, res) => {
+// Network info endpoint accessible without token
+app.get('/network-info', (req, res) => {
     exec('ip a', (error, stdout, stderr) => {
         if (error) {
             res.status(500).send(`Error: ${error.message}`);
@@ -98,6 +99,7 @@ app.get('/network-info', checkToken, (req, res) => {
     });
 });
 
+// Save network test URL protected by token
 app.post('/save-network-test-url', checkToken, (req, res) => {
     const url = req.body.networkTestUrl || 'https://www.google.com';
     fs.writeFileSync(NETWORK_TEST_URL_FILE, url);
@@ -105,7 +107,8 @@ app.post('/save-network-test-url', checkToken, (req, res) => {
     res.send('Network Test URL saved successfully!');
 });
 
-app.get('/get-network-test-url', checkToken, (req, res) => {
+// Get network test URL endpoint accessible without token
+app.get('/get-network-test-url', (req, res) => {
     if (fs.existsSync(NETWORK_TEST_URL_FILE)) {
         const url = fs.readFileSync(NETWORK_TEST_URL_FILE, 'utf8');
         res.send(url);
@@ -114,7 +117,8 @@ app.get('/get-network-test-url', checkToken, (req, res) => {
     }
 });
 
-app.get('/get-hostname', checkToken, (req, res) => {
+// Get hostname endpoint accessible without token
+app.get('/get-hostname', (req, res) => {
     exec('hostname', (error, stdout, stderr) => {
         if (error) {
             res.status(500).send(`Error: ${error.message}`);
@@ -124,6 +128,7 @@ app.get('/get-hostname', checkToken, (req, res) => {
     });
 });
 
+// Setup WiFi endpoint protected by token
 app.get('/setup-wifi', checkToken, (req, res) => {
     const ssid = req.query.ssid;
     const psk = req.query.psk;
@@ -143,6 +148,7 @@ EOF`, (error, stdout, stderr) => {
     });
 });
 
+// Setup AP WiFi endpoint protected by token
 app.get('/setup-ap', checkToken, (req, res) => {
     const ap_ssid = req.query.ap_ssid;
     const ap_psk = req.query.ap_psk;
@@ -157,6 +163,7 @@ app.get('/setup-ap', checkToken, (req, res) => {
     });
 });
 
+// Reboot endpoint protected by token
 app.get('/reboot', checkToken, (req, res) => {
     console.log('Rebooting WebRTC-Cast');
     res.send('<html><head><meta http-equiv="refresh" content="1; URL=\'/\'" /></head><body><h2>Rebooting WebRTC-Cast!</h2></body></html>');
