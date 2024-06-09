@@ -99,6 +99,28 @@ app.get('/network-info', (req, res) => {
     });
 });
 
+// Endpoint to get Station AP settings with token protection
+app.get('/station-ap-settings', checkToken, (req, res) => {
+    fs.readFile('/etc/network/interfaces.d/wlan0', 'utf8', (err, data) => {
+        if (err) {
+            res.status(500).send(`Error reading Station AP settings: ${err.message}`);
+        } else {
+            res.send(data);
+        }
+    });
+});
+
+// Endpoint to get HostAPD settings with token protection
+app.get('/hostapd-settings', checkToken, (req, res) => {
+    fs.readFile('/etc/hostapd/hostapd.conf', 'utf8', (err, data) => {
+        if (err) {
+            res.status(500).send(`Error reading HostAPD settings: ${err.message}`);
+        } else {
+            res.send(data);
+        }
+    });
+});
+
 // Save network test URL protected by token
 app.post('/save-network-test-url', checkToken, (req, res) => {
     const url = req.body.networkTestUrl || 'https://www.google.com';
