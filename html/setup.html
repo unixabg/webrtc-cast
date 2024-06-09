@@ -350,7 +350,7 @@
                 if (response.ok) {
                     const url = new URL(window.location.href);
                     url.searchParams.delete('token');
-                    window.location.href = '/setup';
+                    window.location.href = '/';
                 } else {
                     alert('Logout failed');
                 }
