@@ -23,6 +23,8 @@
             border: 1px solid #888;
             width: 80%;
             max-width: 600px;
+            max-height: 70%;
+            overflow-y: auto;
         }
         .close {
             color: #aaa;
@@ -101,7 +103,6 @@
             </td>
         </tr>
     </table>
-    <pre id="networkInfo" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; display: none;"></pre>
 
     <!-- Modal structure -->
     <div id="settingsModal" class="modal">
@@ -274,9 +275,7 @@
                 return response.text();
             })
             .then(data => {
-                const networkInfoElement = document.getElementById('networkInfo');
-                networkInfoElement.textContent = data;
-                networkInfoElement.style.display = 'block';
+                showModal(data);
             })
             .catch(error => {
                 console.error('Error fetching network info:', error);
