@@ -69,6 +69,17 @@ app.get('/check-token', (req, res) => {
     }
 });
 
+// Invalidate token endpoint
+app.post('/logout', checkToken, (req, res) => {
+    const token = req.headers['x-token'];
+    if (validTokens.has(token)) {
+        validTokens.delete(token);
+        res.json({ message: 'Logged out successfully' });
+    } else {
+        res.status(400).json({ message: 'Invalid token' });
+    }
+});
+
 // Serve setup.html with token protection
 app.get('/setup-protected', (req, res) => {
     console.log('Accessing setup-protected page');

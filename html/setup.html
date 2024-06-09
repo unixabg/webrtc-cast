@@ -49,6 +49,18 @@
             content: "ℹ️";
             font-size: 16px;
         }
+        .logout-button {
+            background-color: grey;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .logout-button:hover {
+            background-color: darkgrey;
+        }
     </style>
 </head>
 <body>
@@ -100,6 +112,7 @@
             <td colspan="2" style="text-align: center;">
                 <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="reboot()">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
+                <button class="logout-button" onclick="logout()">Logout</button>
             </td>
         </tr>
     </table>
@@ -324,6 +337,25 @@
                 showModal(data);
             })
             .catch(error => console.error('Error fetching HostAPD settings:', error));
+        }
+
+        function logout() {
+            fetch('/logout', {
+                method: 'POST',
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('token');
+                    window.location.href = '/setup';
+                } else {
+                    alert('Logout failed');
+                }
+            })
+            .catch(error => console.error('Error logging out:', error));
         }
 
         function showModal(content) {
