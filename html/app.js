@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let isMuted = true; // Initially muted
     let isSharing = false; // Initially not sharing
     let currentStream; // To hold the stream
+    let confirmationTimeout; // Declare the timeout variable globally
+    let streamPlayingConfirmed = false; // Flag to track confirmation
 
     function logToDiagnostics(message) {
         const logEntry = document.createElement('div');
@@ -45,8 +47,6 @@ document.addEventListener('DOMContentLoaded', function() {
         toggleMuteButton.disabled = true;
     };
 
-    let confirmationTimeout; // Declare the timeout variable globally
-    let streamPlayingConfirmed = false; // Flag to track confirmation
     ws.onmessage = function(event) {
         logToDiagnostics('WebSocket message received: ' + event.data);
         const message = JSON.parse(event.data);
