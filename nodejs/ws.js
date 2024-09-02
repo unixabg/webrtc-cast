@@ -209,6 +209,18 @@ app.get('/reboot', checkToken, (req, res) => {
     });
 });
 
+// Check for updates protected by token
+app.get('/check-for-updates', checkToken, (req, res) => {
+    exec('git pull', { cwd: path.join(__dirname, '../') }, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error during git pull: ${error.message}`);
+            res.status(500).send(`Error during update: ${stderr}`);
+        } else {
+            console.log('Update successful: ' + stdout);
+            res.send('Update successful: ' + stdout);
+        }
+    });
+});
 app.use(express.static(path.join(__dirname, '../html')));
 
 // Bind WebSocket server to HTTPS server
