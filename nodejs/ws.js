@@ -23,9 +23,9 @@ const serverOptions = {
 // Create an HTTPS server for serving HTML files
 const httpsServer = https.createServer(serverOptions, app);
 
-// Serve client.html at the root URL
+// Serve welcomeclient.html at the root URL
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../html/client.html'));
+    res.sendFile(path.join(__dirname, '../html/welcome.html'));
 });
 
 // Middleware to check for token

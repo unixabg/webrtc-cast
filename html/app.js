@@ -107,6 +107,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000); // Send heartbeat every 5 seconds
     }
 
+    // Automatically start screen sharing when the page loads
+    startScreenSharing();
+
     // Event listeners for buttons
     toggleShareButton.addEventListener('click', () => {
         if (isSharing) {
@@ -229,7 +232,8 @@ document.addEventListener('DOMContentLoaded', function() {
             confirmationTimeout = null;
         }
         setTimeout(() => {
-            window.location.reload(); // Refresh the page to handle reconnection
+            window.location.href = '/';
+            //window.location.reload(); // Refresh the page to handle reconnection
         }, 3000); // Delay the refresh to give users time to see the status update
     }
 
