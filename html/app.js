@@ -183,6 +183,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     logToDiagnostics('Error obtaining display media: ' + error);
                     updateStatus('Setup Error', 'red');
                     toggleShareButton.disabled = false;
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
                 });
         } else {
             logToDiagnostics(`Retry ${retryCount} of ${maxRetries}`);
