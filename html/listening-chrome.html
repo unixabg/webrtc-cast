@@ -42,8 +42,12 @@
     </style>
 </head>
 <body>
+    <br>
+    <br>
     <div id="videoContainer">
-        <video id="remoteVideo" autoplay playsinline controls muted></video>
+        <video id="remoteVideo" autoplay playsinline controls muted loop>
+            <source src="default.mp4" type="video/mp4">
+        </video>
         <div id="statusOverlay">
             <svg id="internetIndicator" class="status-indicator" viewBox="0 0 24 24" fill="grey">
                 <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
@@ -59,9 +63,6 @@
             </span>
             <span id="versionInfo" style="margin-left: 20px; font-size: 0.9em; color: grey;">version</span>
         </div>
-    </div>
-    <div id="alternativeContent" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; color: white; display: flex; align-items: center; justify-content: center; font-size: 20px;">
-        <p> * * * Welcome to "WebRTC Cast" * * * </p>
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -110,6 +111,10 @@
                         </svg>
                     `;
                 }
+                if (message.includes("Stream is active")) {
+                    remoteVideo.loop = false; // Stop looping once the WebRTC stream is active
+                }
+                /*
                 if (message.includes("Connected") || message.includes("Listening") || message.includes("Waiting") || message.includes("failed") || message.includes("disconnected")) {
                     remoteVideo.style.display = 'none'; // Hide the video player without affecting the container
                     document.getElementById('alternativeContent').style.display = 'flex'; // Show alternative content
@@ -117,6 +122,7 @@
                     remoteVideo.style.display = 'block'; // Show the video player
                     document.getElementById('alternativeContent').style.display = 'none'; // Hide alternative content
                 }
+                */
             }
 
             // Function to update internet status
