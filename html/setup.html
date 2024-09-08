@@ -61,6 +61,10 @@
         .logout-button:hover {
             background-color: darkgrey;
         }
+        .disabled {
+            background-color: grey;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -112,7 +116,7 @@
             <td colspan="2" style="text-align: center;">
                 <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="reboot()">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
-                <button style="background-color: green; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="checkForUpdates()">Check for Updates</button>
+                <button id="updateButton" style="background-color: green; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="checkForUpdates()">Check for Updates</button>
                 <button class="logout-button" onclick="logout()">Logout</button>
             </td>
         </tr>
@@ -130,6 +134,11 @@
         const token = new URLSearchParams(window.location.search).get('token');
 
         function checkForUpdates() {
+            const updateButton = document.getElementById('updateButton');
+            updateButton.disabled = true;
+            updateButton.classList.add('disabled');
+            updateButton.textContent = 'Updating... Please wait';
+
             fetch('/check-for-updates', {
                 headers: {
                     'x-token': token
@@ -139,7 +148,12 @@
             .then(data => {
                 alert(data);
             })
-            .catch(error => alert('Error checking for updates: ' + error.message));
+            .catch(error => alert('Error checking for updates: ' + error.message))
+            .finally(() => {
+                updateButton.disabled = false;
+                updateButton.classList.remove('disabled');
+                updateButton.textContent = 'Check for Updates';
+            });
         }
 
         function checkTokenValidity() {
@@ -304,9 +318,7 @@
             .then(data => {
                 showModal(data);
             })
-            .catch(error => {
-                console.error('Error fetching network info:', error);
-            });
+            .catch(error => alert('Error fetching network info: ' + error.message));
         }
 
         function reboot() {
