@@ -117,6 +117,8 @@
                 <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="reboot()">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
                 <button id="updateButton" style="background-color: green; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="checkForUpdates()">Check for Updates</button>
+                <!-- New button to restart LightDM -->
+                <button style="background-color: orange; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="restartLightDM()">Restart LightDM</button>
                 <button class="logout-button" onclick="logout()">Logout</button>
             </td>
         </tr>
@@ -363,6 +365,26 @@
                 showModal(data);
             })
             .catch(error => console.error('Error fetching HostAPD settings:', error));
+        }
+
+        function restartLightDM() {
+            if (confirm('Are you sure you want to restart the display manager (LightDM)? This will reset the display session.')) {
+                fetch('/restart-lightdm', {
+                    method: 'POST',
+                    headers: {
+                        'x-token': token
+                    }
+                })
+                .then(response => response.text())
+                .then(data => {
+                    alert(data);
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
+
+                })
+                .catch(error => alert('Error restarting LightDM: ' + error.message));
+            }
         }
 
         function logout() {

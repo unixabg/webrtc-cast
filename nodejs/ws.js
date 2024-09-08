@@ -110,6 +110,21 @@ app.get('/network-info', (req, res) => {
     });
 });
 
+// Restart the lightdm actions protected by token
+app.post('/restart-lightdm', checkToken, (req, res) => {
+    // Send a response back to the client immediately
+    res.send('Restarting LightDM...');
+
+    // Execute the command after sending the response
+    exec('sudo systemctl restart lightdm', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error restarting LightDM: ${error.message}`);
+        } else {
+            console.log('LightDM restarted successfully.');
+        }
+    });
+});
+
 // Endpoint to get Station AP settings with token protection
 app.get('/station-ap-settings', checkToken, (req, res) => {
     fs.readFile('/etc/network/interfaces.d/wlan0', 'utf8', (err, data) => {
