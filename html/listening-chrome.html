@@ -64,7 +64,8 @@
             <span id="versionInfo" style="margin-left: 20px; font-size: 0.9em; color: grey;">version</span>
         </div>
     </div>
-    <script>
+
+   <script>
         document.addEventListener('DOMContentLoaded', function() {
             const remoteVideo = document.getElementById('remoteVideo');
             const statusOverlay = document.getElementById('statusOverlay');
@@ -73,10 +74,18 @@
             const streamingIndicator = document.getElementById('streamingIndicator');
             const statusText = document.getElementById('statusText');
             const knownTracks = new Set();
-            // Set the version information dynamically
-            const versionInfo = document.getElementById('versionInfo');
-            const version = 'v1.2.5-next'; // You can fetch this from a server or a config file if needed
-            versionInfo.textContent = version;
+            const versionInfo = document.getElementById('versionInfo'); // Move this up for use in the fetch
+
+            // Fetch the version dynamically
+            fetch('version.txt')
+                .then(response => response.text())
+                .then(version => {
+                    versionInfo.textContent = version;
+                })
+                .catch(error => {
+                    console.error('Error fetching version:', error);
+                    versionInfo.textContent = 'Error fetching version';
+                });
 
             const ws = new WebSocket('wss://localhost:8080');
             const peer = new RTCPeerConnection();

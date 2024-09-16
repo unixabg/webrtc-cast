@@ -28,6 +28,11 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../html/welcome.html'));
 });
 
+// Serve version.txt
+app.get('/version.txt', (req, res) => {
+    res.sendFile(path.join(__dirname, '../version.txt'));
+});
+
 // Middleware to check for token
 function checkToken(req, res, next) {
     const token = req.headers['x-token'];

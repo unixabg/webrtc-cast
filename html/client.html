@@ -144,6 +144,19 @@
             const diagnosticsContent = document.getElementById('diagnosticsContent');
             diagnosticsContent.innerHTML = '';
         });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('version.txt')
+                .then(response => response.text())
+                .then(version => {
+                    const versionElement = document.createElement('p');
+                    versionElement.textContent = `Version: ${version}`;
+                    versionElement.style.fontSize = '0.8em';
+                    versionElement.style.color = 'grey';
+                    document.body.appendChild(versionElement);
+                })
+                .catch(error => console.error('Error fetching version:', error));
+        });
     </script>
 </body>
 </html>
