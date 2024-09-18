@@ -245,7 +245,7 @@ app.use(express.static(path.join(__dirname, '../html')));
 
 // Bind WebSocket server to HTTPS server
 const wss = new WebSocket.Server({ server: httpsServer });
-console.log('Secure WebSocket server started on wss://localhost:8080');
+console.log('Secure WebSocket server started on wss://localhost:8443');
 
 // Handle new WebSocket connections
 wss.on('connection', function(ws) {
@@ -340,7 +340,7 @@ function distributeMessage(data, ws) {
 }
 
 // Start the HTTPS server
-httpsServer.listen(8080, () => {
-    console.log('HTTP and WebSocket server started on https://localhost:8080');
+httpsServer.listen(8443, () => {
+    console.log('HTTP and WebSocket server started on https://localhost:8443');
 });
 
