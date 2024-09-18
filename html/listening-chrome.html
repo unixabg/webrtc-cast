@@ -87,7 +87,12 @@
                     versionInfo.textContent = 'Error fetching version';
                 });
 
-            const ws = new WebSocket('wss://localhost:8080');
+            // Set the websocket dynamically
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.hostname;
+            const port = window.location.port ? `:${window.location.port}` : '';
+            const wsUrl = `${protocol}//${host}${port}`;
+            const ws = new WebSocket(wsUrl);
             const peer = new RTCPeerConnection();
 
             let isPlaying = false; // Flag to manage play state
