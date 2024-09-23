@@ -136,6 +136,9 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 logToDiagnostics('Maximum retries reached. Stopping attempts.');
                 updateStreamingStatus('Streaming failed', 'red');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 3000);
             }
         }
 
