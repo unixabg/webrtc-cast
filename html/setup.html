@@ -65,6 +65,45 @@
             background-color: grey;
             cursor: not-allowed;
         }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
     </style>
 </head>
 <body>
@@ -117,9 +156,17 @@
                 <button style="background-color: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="reboot()">Reboot</button>
                 <button style="background-color: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="fetchNetworkInfo()">Show Network Info</button>
                 <button id="updateButton" style="background-color: green; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="checkForUpdates()">Check for Updates</button>
-                <!-- New button to restart LightDM -->
                 <button style="background-color: orange; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;" onclick="restartLightDM()">Restart LightDM</button>
                 <button class="logout-button" onclick="logout()">Logout</button>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2" style="text-align: center;">
+                <h2>Enable/Disable Listening</h2>
+                <label class="switch">
+                    <input type="checkbox" id="listeningSwitch" onclick="toggleListening()">
+                    <span class="slider round"></span>
+                </label>
             </td>
         </tr>
     </table>
@@ -186,12 +233,7 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 document.getElementById('networkTestUrl').value = data;
             })
@@ -202,16 +244,45 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 document.getElementById('currentHostname').textContent = data;
             })
             .catch(error => console.error('Error fetching hostname:', error));
+
+            // Fetch the current state of listening and set the switch accordingly
+            fetch('/check-listening-disabled', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('listeningSwitch').checked = data.isDisabled;
+            });
+        }
+
+        window.toggleListening = function() {
+            const action = document.getElementById('listeningSwitch').checked ? 'disable' : 'enable';
+
+            fetch(`/toggle-listening-disabled?action=${action}`, {
+                method: 'POST',
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`Listening ${action === 'enable' ? 'enabled' : 'disabled'} successfully.`);
+                } else {
+                    alert('Failed to toggle listening state.');
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling listening state:', error);
+                alert('Error toggling listening state.');
+            });
         }
 
         document.addEventListener('DOMContentLoaded', initialize);
@@ -227,12 +298,7 @@
                 },
                 body: JSON.stringify({ hostname })
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 alert(data);
                 document.getElementById('currentHostname').textContent = hostname;
@@ -249,12 +315,7 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text); });
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 alert(data);
             })
@@ -270,12 +331,7 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text); });
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 alert(data);
             })
@@ -293,12 +349,7 @@
                 },
                 body: JSON.stringify({ networkTestUrl })
             })
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text); });
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 alert('Network Test URL saved successfully!');
             })
@@ -311,12 +362,7 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 showModal(data);
             })
@@ -329,12 +375,7 @@
                     'x-token': token
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
+            .then(response => response.text())
             .then(data => {
                 document.body.innerHTML = data;
             })

@@ -10,6 +10,7 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+const LISTENING_DISABLED_FILE = path.join(__dirname, '../listening.disabled'); // Define the path for the listening.disabled file
 const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
 const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
 const TOKEN_SECRET = 'your_secret'; // Use a secret for token generation
@@ -41,6 +42,11 @@ function checkToken(req, res, next) {
     } else {
         res.status(401).send('<html><body><h1>Unauthorized</h1><p>You must provide the correct token.</p></body></html>');
     }
+}
+
+// Function to check if a file exists
+function fileExists(filePath) {
+    return fs.existsSync(filePath); // This will return true if the file exists, false otherwise
 }
 
 // Serve login.html
@@ -241,6 +247,34 @@ app.get('/check-for-updates', checkToken, (req, res) => {
         }
     });
 });
+
+// Endpoint to check if `listening.disabled` exists protected by token
+app.get('/check-listening-disabled', checkToken, (req, res) => {
+    const isDisabled = fs.existsSync(LISTENING_DISABLED_FILE);
+    res.json({ isDisabled });
+});
+
+// Endpoint to toggle the `listening.disabled` file protected by token
+app.post('/toggle-listening-disabled', checkToken, (req, res) => {
+    const action = req.query.action;
+
+    if (action === 'disable') {
+        // Create the `listening.disabled` file
+        fs.writeFileSync(LISTENING_DISABLED_FILE, 'External connections disabled');
+        console.log('External connections disabled.');
+        res.json({ success: true });
+    } else if (action === 'enable') {
+        // Remove the `listening.disabled` file
+        if (fs.existsSync(LISTENING_DISABLED_FILE)) {
+            fs.unlinkSync(LISTENING_DISABLED_FILE);
+            console.log('External connections enabled.');
+        }
+        res.json({ success: true });
+    } else {
+        res.json({ success: false, message: 'Invalid action' });
+    }
+});
+
 app.use(express.static(path.join(__dirname, '../html')));
 
 // Bind WebSocket server to HTTPS server
@@ -248,7 +282,19 @@ const wss = new WebSocket.Server({ server: httpsServer });
 console.log('Secure WebSocket server started on wss://localhost:8443');
 
 // Handle new WebSocket connections
-wss.on('connection', function(ws) {
+wss.on('connection', function(ws, req) {
+    // Check if the `listening.disabled` file exists
+    if (fileExists(LISTENING_DISABLED_FILE)) {
+        // If the file exists, only allow connections from localhost
+        const clientIp = req.socket.remoteAddress;
+
+        if (clientIp !== '::1' && clientIp !== '127.0.0.1') {
+            console.log(`Rejected connection from ${clientIp} due to listening.disabled being present.`);
+            ws.close(); // Close the WebSocket connection
+            return;
+        }
+    }
+
     console.log('New client connected.');
 
     // Handle incoming messages from clients
