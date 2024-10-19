@@ -109,6 +109,32 @@
                 }
             };
 
+            // Function to check if listening.disabled is present
+            function checkListeningStatus() {
+                fetch('/check-listening-disabled')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.isDisabled) {
+                            // Change the streamingIndicator to red
+                            streamingIndicator.innerHTML = `
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="red">
+                                    <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
+                                </svg>
+                            `;
+                            statusText.textContent = 'Listening disabled';
+                        } else {
+                            // Change the streamingIndicator to its default grey color
+                            streamingIndicator.innerHTML = `
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="grey">
+                                    <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
+                                </svg>
+                            `;
+                            statusText.textContent = 'Listening for stream...';
+                        }
+                    })
+                    .catch(error => console.error('Error checking listening status:', error));
+            }
+
             function updateStatus(message) {
                 statusText.textContent = `Status: ${message}`;
                 if (message === 'Stream is active') {
@@ -119,11 +145,8 @@
                     `;
                     statusText.textContent = ``;
                 } else {
-                    streamingIndicator.innerHTML = `
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="grey">
-                            <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
-                        </svg>
-                    `;
+                    // Check listening status on page load
+                    checkListeningStatus();
                 }
                 if (message.includes("Stream is active")) {
                     remoteVideo.loop = false; // Stop looping once the WebRTC stream is active

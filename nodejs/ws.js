@@ -248,8 +248,8 @@ app.get('/check-for-updates', checkToken, (req, res) => {
     });
 });
 
-// Endpoint to check if `listening.disabled` exists protected by token
-app.get('/check-listening-disabled', checkToken, (req, res) => {
+// Endpoint to check if `listening.disabled` exists without token
+app.get('/check-listening-disabled', (req, res) => {
     const isDisabled = fs.existsSync(LISTENING_DISABLED_FILE);
     res.json({ isDisabled });
 });
