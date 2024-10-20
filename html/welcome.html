@@ -52,21 +52,54 @@
         .start-button:hover {
             background-color: #45a049;
         }
+
+        .disabled-message {
+            font-size: 24px;
+            color: red;
+            font-weight: bold;
+        }
     </style>
-
-
 </head>
 <body>
     <div class="welcome-message">Welcome to WebRTC-Cast!</div>
-    <button class="start-button" onclick="redirectToClient()">Ready<br>Set<br>Cast!</button>
-    <p>(To start casting click Ready, Set, Cast button!)</p>
+    
+    <!-- Button or Disabled Notice -->
+    <div id="statusContainer">
+        <button class="start-button" id="startButton" onclick="redirectToClient()">Ready<br>Set<br>Cast!</button>
+    </div>
+    
+    <!-- Message that will be replaced if casting is disabled -->
+    <p id="messageText">(To start casting click Ready, Set, Cast button!)</p>
 
     <script>
         function redirectToClient() {
             // Redirect to the existing client.html page
             window.location.href = 'client.html';
         }
+
+        // Check if casting is disabled
+        function checkCastingStatus() {
+            fetch('/check-listening-disabled')
+                .then(response => response.json())
+                .then(data => {
+                    const statusContainer = document.getElementById('statusContainer');
+                    const messageText = document.getElementById('messageText');
+                    if (data.isDisabled) {
+                        // If casting is disabled, show the disabled message
+                        statusContainer.innerHTML = '<div class="disabled-message">Casting Disabled</div>';
+                        messageText.textContent = '(See your casting administrator to enable casting!)';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking casting status:', error);
+                });
+        }
+
+        // Check status on page load
         document.addEventListener('DOMContentLoaded', function() {
+            checkCastingStatus();
+
+            // Fetch the version dynamically
             fetch('version.txt')
                 .then(response => response.text())
                 .then(version => {
