@@ -199,7 +199,10 @@
                     .catch(() => updateInternetStatus(false));
             }
 
-            setInterval(checkInternetConnectivity, 5000); // Check connectivity every 5 seconds
+            setInterval(() => {
+                checkInternetConnectivity();  // Check internet connectivity
+                updateStatus('Checking status...');  // Update status
+            }, 5000);  // Run both every 5 seconds
 
             peer.ontrack = event => {
                 console.log('Track received:', event.track.kind, 'ID:', event.track.id, 'Stream ID:', event.streams[0].id);
