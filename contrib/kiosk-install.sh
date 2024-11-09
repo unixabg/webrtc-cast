@@ -22,6 +22,35 @@ echo "kiosk ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/kiosk
 echo "Setting hostname to cast ..."
 echo cast > /etc/hostname
 
+echo "Setting up webrtc-cast repository ..."
+su - kiosk -c "
+  if [ ! -d /home/kiosk/webrtc-cast ]; then
+    echo 'Cloning webrtc-cast repository...'
+    git clone https://github.com/unixabg/webrtc-cast.git /home/kiosk/webrtc-cast
+  else
+    echo 'webrtc-cast repository already exists, pulling latest updates...'
+    cd /home/kiosk/webrtc-cast
+    git pull
+  fi
+"
+
+echo "Generating self-signed certificates ..."
+su - kiosk -c "
+  cd /home/kiosk/webrtc-cast
+  if [ ! -f cert.pem ] || [ ! -f key.pem ]; then
+    echo 'Creating self-signed certificates...'
+    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -passout pass: -subj '/C=US/ST=State/L=Locality/O=Organization/CN=localhost'
+  else
+    echo 'Certificates already exist, skipping generation...'
+  fi
+"
+
+echo "Installing Node.js dependencies ..."
+su - kiosk -c "
+  cd /home/kiosk/webrtc-cast
+  npm install express
+"
+
 echo "Setting up the wrapper launcher ..."
 cat > /usr/bin/kiosk << EOF
 #!/bin/sh
@@ -32,29 +61,10 @@ xset -dpms
 xset s off
 xset s noblank
 
-## Set HDMI as the default audio output and unmute audio
-#amixer cset numid=3 2  # Set HDMI as the default audio output
-#amixer set Master 98% unmute
-#amixer set PCM 98% unmute
-#amixer set Headphones 98% unmute
-#amixer set Speaker 98% unmute
-
-# Test for webrtc-cast and if not there clone and build setup
-if [ -d /home/kiosk/webrtc-cast ]; then
-  echo "Looks like the /home/kiosk/webrtc-cast directory exists."
-  echo "Starting the webrtc-cast services ..."
-  cd /home/kiosk/webrtc-cast
-  nodejs nodejs/ws.js &
-else
-  echo "No directory of /home/kiosk/webrtc-cast. Attempting to install webrtc-cast ..."
-  cd /home/kiosk
-  git clone https://github.com/unixabg/webrtc-cast.git
-  cd webrtc-cast
-  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -passout pass: -subj "/C=US/ST=State/L=Locality/O=Organization/CN=localhost"
-  sleep 2
-  npm install express
-  nodejs nodejs/ws.js &
-fi
+# Start WebRTC-cast server
+echo "Starting the WebRTC-cast services ..."
+cd /home/kiosk/webrtc-cast
+nodejs nodejs/ws.js &
 
 # Clear Chromium cache and config
 echo "Just for sanity let's drop the .cache and .config for kiosk."
@@ -66,7 +76,6 @@ rm -f /var/cache/lightdm/dmrc/kiosk.dmrc
 /usr/bin/metacity &
 
 # Launch Chromium in kiosk mode
-#chromium --disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies --autoplay-policy=no-user-gesture-required --ignore-certificate-errors --ignore-urlfetcher-cert-requests --ignore-websocket-cert-errors --kiosk file:///home/kiosk/webrtc-cast/html/listening-chrome.html
 chromium --disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies --autoplay-policy=no-user-gesture-required --ignore-certificate-errors --ignore-urlfetcher-cert-requests --ignore-websocket-cert-errors --kiosk https://localhost:8443/listening-chrome.html
 
 EOF
@@ -92,3 +101,4 @@ sed -i 's/#autologin-user=/autologin-user=kiosk/' /etc/lightdm/lightdm.conf
 sed -i 's/#autologin-session=/autologin-session=kiosk/' /etc/lightdm/lightdm.conf
 
 echo "Settings for kiosk done. Type reboot to reboot the computer and test."
+
