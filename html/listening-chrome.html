@@ -59,7 +59,7 @@
                 <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
             </svg>
             <span id="statusText">
-                Status: Waiting for stream...
+                Waiting for stream...
             </span>
             <span id="versionInfo" style="margin-left: 20px; font-size: 0.9em; color: grey;">version</span>
         </div>
@@ -134,7 +134,7 @@
                         })
                     .catch(error => console.error('Error checking listening status:', error));
                }
-                statusText.textContent = `Status: ${message}`;
+                statusText.textContent = `${message}`;
             }
 
             // Function to update internet status
