@@ -33,7 +33,7 @@
         .status-indicator {
             width: 16px;
             height: 16px;
-            margin-right: 10px;
+            margin-right: 5px;
         }
         .websocket-indicator {
             width: 10px;
@@ -61,7 +61,7 @@
             <span id="statusText">
                 Waiting for stream...
             </span>
-            <span id="versionInfo" style="margin-left: 20px; font-size: 0.9em; color: grey;">version</span>
+            <span id="versionInfo" style="margin-left: 5px; font-size: 0.9em; color: grey;">version</span>
         </div>
     </div>
 
@@ -135,6 +135,10 @@
                     .catch(error => console.error('Error checking listening status:', error));
                }
                 statusText.textContent = `${message}`;
+		// Clear the text content after 3 seconds
+                setTimeout(() => {
+                    statusText.textContent = "";
+                }, 3000); // 3000 milliseconds = 3 seconds
             }
 
             // Function to update internet status
