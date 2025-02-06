@@ -10,6 +10,7 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+const CASTING_ACTIVE_FILE = path.join(__dirname, '../casting.active'); // Define the path for the casting.active file
 const LISTENING_DISABLED_FILE = path.join(__dirname, '../listening.disabled'); // Define the path for the listening.disabled file
 const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
 const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
@@ -24,9 +25,28 @@ const serverOptions = {
 // Create an HTTPS server for serving HTML files
 const httpsServer = https.createServer(serverOptions, app);
 
+// Remove casting.active file on startup to ensure no stale state
+if (fs.existsSync(CASTING_ACTIVE_FILE)) {
+    fs.unlinkSync(CASTING_ACTIVE_FILE);
+    console.log('Removed stale casting.active file on startup.');
+}
+
 // Serve welcomeclient.html at the root URL
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../html/welcome.html'));
+});
+
+// Prevent access to client.html if casting is active or listening is disabled
+app.get('/client.html', (req, res) => {
+    if (fs.existsSync(CASTING_ACTIVE_FILE)) {
+        console.log('Redirecting user to welcome page: Cast is already active.');
+        res.redirect('/');
+    } else if (fs.existsSync(LISTENING_DISABLED_FILE)) {
+        console.log('Redirecting user to welcome page: Casting is disabled.');
+        res.redirect('/');
+    } else {
+        res.sendFile(path.join(__dirname, '../html/client.html'));
+    }
 });
 
 // Serve version.txt
@@ -248,6 +268,12 @@ app.get('/check-for-updates', checkToken, (req, res) => {
     });
 });
 
+// Endpoint to check if casting is active
+app.get('/check-casting-active', (req, res) => {
+    const isActive = fs.existsSync(CASTING_ACTIVE_FILE);
+    res.json({ isActive });
+});
+
 // Endpoint to check if `listening.disabled` exists without token
 app.get('/check-listening-disabled', (req, res) => {
     const isDisabled = fs.existsSync(LISTENING_DISABLED_FILE);
@@ -355,10 +381,14 @@ function handleClientMessage(data, ws) {
             break;
         case 'stream-stopped':
             console.log('Stream stopped message received:', data.data);
+            if (fs.existsSync(CASTING_ACTIVE_FILE)) {
+                fs.unlinkSync(CASTING_ACTIVE_FILE);
+            }
             distributeMessage(data, ws);
             break;
         case 'stream-playing':
             console.log('Stream playing message received:', data.data);
+            fs.writeFileSync(CASTING_ACTIVE_FILE, 'Stream is active');
             distributeMessage(data, ws);
             break;
         case 'unmute-audio':

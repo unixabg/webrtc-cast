@@ -76,9 +76,22 @@
             // Redirect to the existing client.html page
             window.location.href = 'client.html';
         }
-
-        // Check if casting is disabled
         function checkCastingStatus() {
+            fetch('/check-casting-active')
+                .then(response => response.json())
+                .then(data => {
+                    const statusContainer = document.getElementById('statusContainer');
+                    const messageText = document.getElementById('messageText');
+                    const startButton = document.getElementById('startButton');
+
+                    if (data.isActive) {
+                        statusContainer.innerHTML = '<div class="disabled-message">Casting is already active</div>';
+                        messageText.textContent = '(Please wait for the current cast to finish!)';
+                    }
+                })
+                .catch(error => console.error('Error checking casting status active casting:', error));
+
+            // Check if casting is disabled
             fetch('/check-listening-disabled')
                 .then(response => response.json())
                 .then(data => {
@@ -91,7 +104,7 @@
                     }
                 })
                 .catch(error => {
-                    console.error('Error checking casting status:', error);
+                    console.error('Error checking casting status listening disabled:', error);
                 });
         }
 
