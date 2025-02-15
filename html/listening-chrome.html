@@ -102,6 +102,8 @@
                 if (Date.now() - lastPongTimestamp > 10000) { // 10 seconds without a pong
                     updateStatus('Connection lost. No ping received from client player, refreshing page for next connection...');
                     console.error('Connection lost. No ping received from client player, refreshing page for next connection...');
+                    // Here we need to send stream-stopped to the socket server to clean up the casting.active file
+                    ws.send(JSON.stringify({ type: 'stream-stopped', data: 'Station with listening-chrome.html believes the connection has been broken to client with no pong.' }));
                     remoteVideo.srcObject = null;
                     setTimeout(() => {
                         window.location.reload(); // Refresh the page to handle reconnection
