@@ -6,16 +6,40 @@
     <title>WebRTC Receiver</title>
     <style>
         body, html { margin: 0; height: 100%; overflow: hidden; }
-        #videoContainer {
-            position: relative;
+        #iframe {
             width: 100%;
-            background: black; /* Ensures there's a background when the video is not visible */
+            height: 100%;
+            border: none;
+            display: none;
+        }
+        #defaultIframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: none;
+            z-index: 1;
+        }
+        #videoContainer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
         }
         #remoteVideo {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
-            display: block; /* Ensure this changes based on status */
+            display: block;
+            z-index: 1;
         }
         #statusOverlay {
             position: absolute;
@@ -48,6 +72,7 @@
         <video id="remoteVideo" autoplay playsinline controls muted loop>
             <source src="default.mp4" type="video/mp4">
         </video>
+        <iframe id="defaultIframe" style="width:100%; height:100%; border:none; display: none;"></iframe>
         <div id="statusOverlay">
             <svg id="internetIndicator" class="status-indicator" viewBox="0 0 24 24" fill="grey">
                 <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
@@ -86,7 +111,25 @@
                     console.error('Error fetching version:', error);
                     versionInfo.textContent = 'Error fetching version';
                 });
+            fetch('/get-default-url')
+                .then(response => response.text())
+                .then(url => {
+                    const video = document.getElementById('remoteVideo');
+                    const iframe = document.getElementById('defaultIframe');
 
+                    if (url && url.startsWith('http')) {
+                        video.style.display = 'none';
+                        iframe.src = url;
+                        iframe.style.display = 'block';
+                    } else {
+                        video.style.display = 'block';
+                        iframe.style.display = 'none';
+                    }
+                })
+               .catch(error => {
+                    console.error('Error fetching default URL:', error);
+                    document.getElementById('remoteVideo').style.display = 'block';
+                });
             // Set the websocket dynamically
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.hostname;

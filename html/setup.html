@@ -133,6 +133,16 @@
         </tr>
         <tr>
             <td colspan="2">
+                <h2>Optional Web URL</h2>
+                <form id="defaultUrlForm">
+                    <label for="defaultUrl">Web URL:</label>
+                    <input type="url" id="defaultUrl" name="defaultUrl" placeholder="https://example.com" style="width: 80%;"><br><br>
+                    <input type="submit" value="Save Web URL">
+                </form>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2">
                 <h2>Network Test URL</h2>
                 <form id="networkTestForm">
                     <label for="networkTestUrl">Test URL:</label>
@@ -239,6 +249,17 @@
                 document.getElementById('networkTestUrl').value = data;
             })
             .catch(error => console.error('Error fetching network test URL:', error));
+
+            fetch('/get-default-url', {
+                headers: {
+                    'x-token': token
+                }
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('defaultUrl').value = data;
+            })
+            .catch(error => console.error('Error fetching default URL:', error));
 
             fetch('/get-hostname', {
                 headers: {
@@ -355,6 +376,22 @@
                 alert('Network Test URL saved successfully!');
             })
             .catch(error => alert(`Error: ${error.message}`));
+        });
+
+        document.getElementById('defaultUrlForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const defaultUrl = document.getElementById('defaultUrl').value;
+            fetch('/save-default-url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-token': token
+                },
+                body: JSON.stringify({ defaultUrl })
+            })
+            .then(response => response.text())
+            .then(data => alert(data))
+            .catch(error => alert('Error saving URL: ' + error.message));
         });
 
         function fetchNetworkInfo() {

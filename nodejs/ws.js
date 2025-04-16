@@ -16,6 +16,7 @@ const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); /
 const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
 const TOKEN_SECRET = 'your_secret'; // Use a secret for token generation
 const validTokens = new Set(); // Store valid tokens in memory
+const DEFAULT_URL_FILE = path.join(__dirname, '../default_url.txt');
 
 const serverOptions = {
     cert: fs.readFileSync(path.join(__dirname, '../cert.pem')), // Read cert from ./ directory
@@ -52,6 +53,15 @@ app.get('/client.html', (req, res) => {
 // Serve version.txt
 app.get('/version.txt', (req, res) => {
     res.sendFile(path.join(__dirname, '../version.txt'));
+});
+
+app.get('/get-default-url', (req, res) => {
+    if (fs.existsSync(DEFAULT_URL_FILE)) {
+        const url = fs.readFileSync(DEFAULT_URL_FILE, 'utf8');
+        res.send(url.trim());
+    } else {
+        res.send('');
+    }
 });
 
 // Middleware to check for token
@@ -184,6 +194,12 @@ app.post('/save-network-test-url', checkToken, (req, res) => {
     fs.writeFileSync(NETWORK_TEST_URL_FILE, url);
     console.log(`Network Test URL set to: ${url}`);
     res.send('Network Test URL saved successfully!');
+});
+
+// Save default URL protected by token
+app.post('/save-default-url', checkToken, (req, res) => {
+    fs.writeFileSync(DEFAULT_URL_FILE, req.body.defaultUrl || '');
+    res.send('Default URL saved.');
 });
 
 // Get network test URL endpoint accessible without token
