@@ -200,6 +200,13 @@ app.post('/save-network-test-url', checkToken, (req, res) => {
 app.post('/save-default-url', checkToken, (req, res) => {
     fs.writeFileSync(DEFAULT_URL_FILE, req.body.defaultUrl || '');
     res.send('Default URL saved.');
+
+    // Broadcast to all connected clients to reload
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'reload-default-url' }));
+        }
+    });
 });
 
 // Get network test URL endpoint accessible without token

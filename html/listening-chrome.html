@@ -111,26 +111,46 @@
                     console.error('Error fetching version:', error);
                     versionInfo.textContent = 'Error fetching version';
                 });
-            fetch('/get-default-url')
-                .then(response => response.text())
-                .then(url => {
-                    const video = document.getElementById('remoteVideo');
-                    const iframe = document.getElementById('defaultIframe');
+            function tryLoadDefaultUrl() {
+                fetch('/get-default-url')
+                    .then(response => response.text())
+                    .then(url => {
+                        const video = document.getElementById('remoteVideo');
+                        const iframe = document.getElementById('defaultIframe');
 
-                    if (url && url.startsWith('http')) {
-                        video.style.display = 'none';
-                        iframe.src = url;
-                        iframe.style.display = 'block';
-                    } else {
-                        video.style.display = 'block';
-                        iframe.style.display = 'none';
-                    }
-                })
-               .catch(error => {
-                    console.error('Error fetching default URL:', error);
-                    document.getElementById('remoteVideo').style.display = 'block';
-                });
-            // Set the websocket dynamically
+                        if (url && url.startsWith('http')) {
+                            // Try fetching the remote page
+                            fetch(url, { method: 'HEAD', mode: 'no-cors' })  // no-cors allows probing for availability without strict origin checks
+                                .then(() => {
+                                    console.log('Default URL is reachable. Loading iframe...');
+                                    video.style.display = 'none';
+                                    iframe.src = url;
+                                    iframe.style.display = 'block';
+                                })
+                                .catch(() => {
+                                    console.warn('Default URL not reachable yet. Using fallback video.');
+                                    video.style.display = 'block';
+                                    iframe.style.display = 'none';
+                                    // Retry after delay
+                                    setTimeout(tryLoadDefaultUrl, 5000);
+                                });
+                        } else {
+                            console.log('No default URL set. Using fallback video.');
+                            video.style.display = 'block';
+                            iframe.style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching default URL:', error);
+                        document.getElementById('remoteVideo').style.display = 'block';
+                        document.getElementById('defaultIframe').style.display = 'none';
+                        setTimeout(tryLoadDefaultUrl, 5000);
+                    });
+            }
+
+            // Try to load a default url if one is configured
+            tryLoadDefaultUrl();
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.hostname;
             const port = window.location.port ? `:${window.location.port}` : '';
@@ -304,6 +324,10 @@
                     case 'mute-audio':
                         console.log('Mute audio signal received.');
                         remoteVideo.muted = true;
+                        break;
+                    case 'reload-default-url':
+                        console.log('Received reload-default-url signal. Reloading page...');
+                        window.location.reload();
                         break;
                 }
             };
