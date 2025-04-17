@@ -239,6 +239,31 @@
                 return;
             }
 
+            setInterval(() => {
+                fetch('/check-token', {
+                    headers: {
+                        'x-token': token
+                    }
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        console.warn('Token expired or server rebooted. Redirecting to login.');
+                        window.location.href = '/setup';
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (!data.valid) {
+                        console.warn('Invalid token detected. Redirecting to login.');
+                        window.location.href = '/setup';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking token validity:', error);
+                    window.location.href = '/setup';
+                });
+            }, 5000); // Check every 5 seconds
+
             fetch('/get-network-test-url', {
                 headers: {
                     'x-token': token
