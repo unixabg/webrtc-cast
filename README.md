@@ -1,12 +1,39 @@
-# webrtc-cast
-Use WebRTC to cast chrome
+## WebRTC for casting with Chrome/Chromium
 
 ### Requirements
 * Linux
     * Tested with Debian and PiOS
 * nodejs, npm, git, and chromium
 * npm install express
-### Notes
+
+### Kiosk Install
+> [!CAUTION]
+>
+> The kiosk install will make a lot of changes to your install. There is no
+> automated undo from the kiosk-install.sh script. Do not proceed if you can
+> not easily re-install linux on your system.
+>
+> The kiosk install requires internet access to install.
+
+* Clone the repository
+
+`git clone https://github.com/unixabg/webrtc-cast.git`
+
+* Change directory to the checkout dir
+
+`cd webrtc-cast`
+
+* For the kiosk install we will use the run as root (or sudo)
+contrib/kiosk-install.sh
+
+`sudo contrib/kiosk-install.sh `
+
+* When the installer finishes and you reboot you should have a setup
+with a listening-chrome.html running in full screen and a listening
+web socket server. Hence, on a client machine go to
+https://ipAddressOfCast:8443 to start casting.
+
+### Old Notes
 * Clone the project.
 * Move to the cloned directory: `cd webrtc-cast`
 * If you don't have ssl certs generate self sigend with: `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`
