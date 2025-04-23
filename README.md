@@ -35,7 +35,7 @@ https://ipAddressOfCast:8443 to start casting.
 
 ### Kiosk listening-chrom.html
 #### Status Icons
-Internet Status
+Internet Status - FIXME - github strips raw svg
 
 <svg viewBox="0 0 24 24" fill="grey" width="20"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg> - Internet status unknown
 <svg viewBox="0 0 24 24" fill="green" width="20"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg> - Internet access working
