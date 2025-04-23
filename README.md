@@ -33,6 +33,13 @@ with a listening-chrome.html running in full screen and a listening
 web socket server. Hence, on a client machine go to
 https://ipAddressOfCast:8443 to start casting.
 
+### Setup Page
+* The setup page password is located in the file ./password.txt
+* To change the password to access the setup.page simply edit the
+./password.txt file with the password you wish.
+* To access the setup page go to the url 
+https://ipAddressOfCast:8443/setup and enter the password.
+
 ### Old Notes
 * Clone the project.
 * Move to the cloned directory: `cd webrtc-cast`
