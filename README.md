@@ -33,6 +33,29 @@ with a listening-chrome.html running in full screen and a listening
 web socket server. Hence, on a client machine go to
 https://ipAddressOfCast:8443 to start casting.
 
+### Kiosk listening-chrom.html
+#### Status Icons
+Internet Status
+
+<svg viewBox="0 0 24 24" fill="grey" width="20"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg> - Internet status unknown
+<svg viewBox="0 0 24 24" fill="green" width="20"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg> - Internet access working
+<svg viewBox="0 0 24 24" fill="red" width="20"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 8.69 4 5.94 6.11 5.35 9.14 2.42 9.36 0 11.92 0 15c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg> - Internet access not working
+
+Socket Server Status
+
+<svg viewBox="0 0 24 24" fill="grey" width="20"><circle cx="12" cy="12" r="10" /></svg> - Socket Server status unkown
+<svg viewBox="0 0 24 24" fill="green" width="20"><circle cx="12" cy="12" r="10" /></svg> - Socket Server working
+<svg viewBox="0 0 24 24" fill="red" width="20"><circle cx="12" cy="12" r="10" /></svg> - Socket Server not working
+
+Streaming Status
+
+<svg viewBox="0 0 24 24" fill="grey" width="20"><path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" /></svg> - Listening for stream active
+<svg viewBox="0 0 24 24" fill="green" width="20"><path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" /></svg> - Stream active
+<svg viewBox="0 0 24 24" fill="red" width="20"><path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" /></svg> - Listening for stream disabled
+
+
+
+
 ### Setup Page
 * The setup page password is located in the file ./password.txt
 * To change the password to access the setup.page simply edit the
