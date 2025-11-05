@@ -388,7 +388,8 @@
         // Format 24h as HH:MM:SS
         function fmt24(d){
           const pad = n => String(n).padStart(2,'0');
-          return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+          return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          //return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
         }
 
         // Update the clock text
@@ -396,7 +397,7 @@
         function startClockTicks(){
           stopClockTicks();
           clockText.textContent = fmt24(new Date());
-          tickTimer = setInterval(() => { clockText.textContent = fmt24(new Date()); }, 1000);
+          tickTimer = setInterval(() => { clockText.textContent = fmt24(new Date()); }, 60000);
         }
         function stopClockTicks(){
           if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
