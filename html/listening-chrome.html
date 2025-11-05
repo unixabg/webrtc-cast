@@ -89,6 +89,16 @@
             <span id="versionInfo" style="margin-left: 5px; font-size: 0.9em; color: grey;">version</span>
         </div>
     </div>
+<!-- Clock overlay (shown only when /check-clock-enabled says true) -->
+<div id="clockOverlay"
+     style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:10;">
+  <div style="font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+              font-size:18vw; font-weight:700; line-height:1;
+              text-shadow:0 0 25px rgba(0,0,0,.45), 0 2px 12px rgba(0,0,0,.35);
+              color:white;">
+    <span id="clockText">00:00</span>
+  </div>
+</div>
 
    <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -158,7 +168,7 @@
             const ws = new WebSocket(wsUrl);
             const peer = new RTCPeerConnection();
 
-            let isPlaying = false; // Flag to manage play state
+            window.isPlaying = false; // Flag to manage play state
             let lastPongTimestamp = Date.now();
 
             const checkConnection = () => {
@@ -176,13 +186,14 @@
 
             function updateStatus(message) {
                 if (message === 'Stream is active' || message.startsWith('Stream')) {
-                    isPlaying = true; // Ensure the stream flag is set
+                    window.isPlaying = true; // Ensure the stream flag is set
                     streamingIndicator.innerHTML = `
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="green">
                                     <path d="M12 5C7.58 5 4 8.58 4 13C4 17.42 7.58 21 12 21C16.42 21 20 17.42 20 13C20 8.58 16.42 5 12 5M12 19C8.69 19 6 16.31 6 13C6 9.69 8.69 7 12 7C15.31 7 18 9.69 18 13C18 16.31 15.31 19 12 19M14.5 11L10 13.5V8.5L14.5 11Z" />
                                 </svg>
                             `;
                     remoteVideo.loop = false; // Stop looping once the WebRTC stream is active
+                    hideClock();
                 } else {
                     fetch('/check-listening-disabled')
                         .then(response => response.json())
@@ -259,14 +270,15 @@
                 });
 
                 // Check if playback is not already started
-                if (!isPlaying) {
+                if (!window.isPlaying) {
                     setTimeout(() => {
-                        isPlaying = true;
+                        window.isPlaying = true;
                         remoteVideo.play()
                             .then(() => {
                                 console.log('Playback started for stream ID:', event.streams[0].id);
                                 ws.send(JSON.stringify({ type: 'stream-playing', data: 'Stream is actively playing on the receiver side.' }));
                                 updateStatus('Stream is active');
+                                hideClock();
                             })
                             .catch(error => {
                                 console.error('Failed to start playback:', error);
@@ -296,7 +308,8 @@
                     case 'stream-stopped':
                         console.log('Stream stopped by the client.');
                         updateStatus('Stream stopped by client. Waiting for new stream...');
-                        isPlaying = false; // Reset play state
+                        window.isPlaying = false; // Reset play state
+                        showClockIfEnabled();
                         setTimeout(() => {
                             updateStatus('Listening for stream...');
                         }, 3000);
@@ -367,6 +380,83 @@
             };
         });
     </script>
+    <script>
+        // Elements
+        const clockOverlay = document.getElementById('clockOverlay');
+        const clockText    = document.getElementById('clockText');
+
+        // Format 24h as HH:MM:SS
+        function fmt24(d){
+          const pad = n => String(n).padStart(2,'0');
+          return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+
+        // Update the clock text
+        let tickTimer = null;
+        function startClockTicks(){
+          stopClockTicks();
+          clockText.textContent = fmt24(new Date());
+          tickTimer = setInterval(() => { clockText.textContent = fmt24(new Date()); }, 1000);
+        }
+        function stopClockTicks(){
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+        }
+
+        // Ask server if clock is enabled (no token required)
+        async function refreshClockToggle(){
+          if (window.isPlaying) {
+            hideClock();
+            return;
+          }
+          try {
+            const r = await fetch('/check-clock-enabled', { cache: 'no-store' });
+            const { isEnabled } = await r.json();
+            if (isEnabled) {
+              clockOverlay.style.display = 'flex';
+              if (!tickTimer) startClockTicks();
+            } else {
+              clockOverlay.style.display = 'none';
+              stopClockTicks();
+            }
+          } catch(e){
+            // On error, default to hidden so behavior matches "disabled"
+            clockOverlay.style.display = 'none';
+            stopClockTicks();
+            console.warn('Clock toggle check failed:', e);
+          }
+        }
+
+        // Initial load + periodic polling to pick up changes from setup.html
+        refreshClockToggle();
+        const pollTimer = setInterval(refreshClockToggle, 10000); // every 10s
+
+        // Be polite to CPU when tab/page is hidden
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            stopClockTicks();
+          } else {
+            if (clockOverlay.style.display !== 'none') startClockTicks();
+          }
+        });
+
+        // Cleanup (optional; good hygiene)
+        window.addEventListener('beforeunload', () => {
+          clearInterval(pollTimer);
+          stopClockTicks();
+        });
+
+        function hideClock(){
+          clockOverlay.style.display = 'none';
+          stopClockTicks();
+        }
+
+        function showClockIfEnabled(){
+          // Re-check the server flag and show if enabled
+          refreshClockToggle();
+        }
+
+    </script>
+
 </body>
 </html>
 

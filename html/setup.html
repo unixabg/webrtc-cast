@@ -177,10 +177,16 @@
                     <input type="checkbox" id="listeningSwitch" onclick="toggleListening()">
                     <span class="slider round"></span>
                 </label>
-            </td>
-        </tr>
+                </br>
+                <h2 style="display: inline;">Show clock overlay when idle (24-hour)</h2>
+                <label class="switch">
+                    <input id="clockSwitch" type="checkbox" onclick="toggleClock()">
+                    <span class="slider round"></span>
+                </label>
+             </td>
 
-   </table>
+        </tr>
+    </table>
 
     <!-- Modal structure -->
     <div id="settingsModal" class="modal">
@@ -297,16 +303,34 @@
             })
             .catch(error => console.error('Error fetching hostname:', error));
 
-            // Fetch the current state of listening and set the switch accordingly
+            // Fetch current listening state and set the switch accordingly
             fetch('/check-listening-disabled', {
-                headers: {
-                    'x-token': token
-                }
+                headers: { 'x-token': token },
+                cache: 'no-store'
             })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('listeningSwitch').checked = data.isDisabled;
-            });
+            .then(r => r.json())
+                .then(({ isDisabled }) => {
+                    document.getElementById('listeningSwitch').checked = !!isDisabled;
+                })
+                .catch(err => {
+                    console.warn('Listening state check failed:', err);
+                    document.getElementById('listeningSwitch').checked = false;
+                });
+
+            // Fetch current clock state and set the switch accordingly
+            fetch('/check-clock-enabled', {
+                headers: { 'x-token': token },          // optional; server ignores it
+                cache: 'no-store'
+            })
+            .then(r => r.json())
+                .then(({ isEnabled }) => {
+                    document.getElementById('clockSwitch').checked = !!isEnabled;
+                })
+                .catch(err => {
+                    console.warn('Clock state check failed:', err);
+                    document.getElementById('clockSwitch').checked = false;
+                });
+
         }
 
         window.toggleListening = function() {
@@ -331,6 +355,30 @@
                 alert('Error toggling listening state.');
             });
         }
+
+        window.toggleClock = function() {
+            const checked = document.getElementById('clockSwitch').checked;
+            const action = checked ? 'enable' : 'disable';
+
+            fetch(`/toggle-clock-enabled?action=${action}`, {
+                method: 'POST',
+                headers: {
+                    'x-token': token   // same header as your toggleListening
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`Clock ${action === 'enable' ? 'enabled' : 'disabled'} successfully.`);
+                } else {
+                    alert('Failed to toggle clock state.');
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling clock state:', error);
+                alert('Error toggling clock state.');
+            });
+        };
 
         document.addEventListener('DOMContentLoaded', initialize);
 

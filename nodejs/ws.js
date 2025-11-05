@@ -11,12 +11,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const CASTING_ACTIVE_FILE = path.join(__dirname, '../casting.active'); // Define the path for the casting.active file
+const CLOCK_ENABLED_FILE = path.join(__dirname, '../clock.enabled');
 const LISTENING_DISABLED_FILE = path.join(__dirname, '../listening.disabled'); // Define the path for the listening.disabled file
 const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
 const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
 const TOKEN_SECRET = 'your_secret'; // Use a secret for token generation
 const validTokens = new Set(); // Store valid tokens in memory
 const DEFAULT_URL_FILE = path.join(__dirname, '../default_url.txt');
+
 
 const serverOptions = {
     cert: fs.readFileSync(path.join(__dirname, '../cert.pem')), // Read cert from ./ directory
@@ -317,6 +319,34 @@ app.post('/toggle-listening-disabled', checkToken, (req, res) => {
         if (fs.existsSync(LISTENING_DISABLED_FILE)) {
             fs.unlinkSync(LISTENING_DISABLED_FILE);
             console.log('External connections enabled.');
+        }
+        res.json({ success: true });
+    } else {
+        res.json({ success: false, message: 'Invalid action' });
+    }
+});
+
+// --- Clock toggle using touch file ---
+// Endpoint to check if `clock.enabled` exists without token
+app.get('/check-clock-enabled', (req, res) => {
+    const isEnabled = fs.existsSync(CLOCK_ENABLED_FILE);
+    res.json({ isEnabled });
+});
+
+// Endpoint to toggle the `clock.enabled` file protected by token
+app.post('/toggle-clock-enabled', checkToken, (req, res) => {
+    const action = req.query.action;
+
+    if (action === 'enable') {
+        // Create the `clock.enabled` file
+        fs.writeFileSync(CLOCK_ENABLED_FILE, 'Clock overlay enabled');
+        console.log('Clock overlay enabled.');
+        res.json({ success: true });
+    } else if (action === 'disable') {
+        // Remove the `clock.enabled` file
+        if (fs.existsSync(CLOCK_ENABLED_FILE)) {
+            fs.unlinkSync(CLOCK_ENABLED_FILE);
+            console.log('Clock overlay disabled.');
         }
         res.json({ success: true });
     } else {
