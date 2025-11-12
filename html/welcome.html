@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="10">
     <title>WebRTC-Cast</title>
     <style>
         body {
@@ -112,6 +111,9 @@
         // Check status on page load
         document.addEventListener('DOMContentLoaded', function() {
             checkCastingStatus();
+
+            // Repeat check every 5 seconds
+            setInterval(checkCastingStatus, 5000);
 
             // Fetch the version dynamically
             fetch('version.txt')
