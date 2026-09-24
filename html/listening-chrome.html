@@ -203,6 +203,29 @@
             let lastPongTimestamp = Date.now();
             let connectionCheckTimer = null;
 
+            // Resolve once ICE gathering is complete (or after timeoutMs as a
+            // safety net) so peer.localDescription carries every candidate.
+            function waitForIceGathering(pc, timeoutMs = 2000) {
+                if (pc.iceGatheringState === 'complete') {
+                    return Promise.resolve();
+                }
+                return new Promise(resolve => {
+                    const done = () => {
+                        pc.removeEventListener('icegatheringstatechange', onChange);
+                        clearTimeout(timer);
+                        resolve();
+                    };
+                    const onChange = () => {
+                        if (pc.iceGatheringState === 'complete') done();
+                    };
+                    const timer = setTimeout(() => {
+                        console.warn(`ICE gathering not complete after ${timeoutMs}ms, sending what we have.`);
+                        done();
+                    }, timeoutMs);
+                    pc.addEventListener('icegatheringstatechange', onChange);
+                });
+            }
+
             const checkConnection = () => {
                 if (Date.now() - lastPongTimestamp > 10000) { // 10 seconds without a pong
                     updateStatus('Connection lost. No ping received from client player, refreshing page for next connection...');
@@ -364,6 +387,7 @@
                         peer.setRemoteDescription(new RTCSessionDescription(message.data))
                             .then(() => peer.createAnswer())
                             .then(answer => peer.setLocalDescription(answer))
+                            .then(() => waitForIceGathering(peer)) // send the answer with all candidates in it
                             .then(() => {
                                 console.log('Local description set, sending answer.');
                                 ws.send(JSON.stringify({ type: 'answer', data: peer.localDescription }));

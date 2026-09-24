@@ -79,6 +79,29 @@ document.addEventListener('DOMContentLoaded', function() {
         logToDiagnostics('Stream added to local video.');
     };
 
+    // Resolve once ICE gathering is complete (or after timeoutMs as a safety
+    // net) so peer.localDescription carries every candidate.
+    function waitForIceGathering(pc, timeoutMs = 2000) {
+        if (pc.iceGatheringState === 'complete') {
+            return Promise.resolve();
+        }
+        return new Promise(resolve => {
+            const done = () => {
+                pc.removeEventListener('icegatheringstatechange', onChange);
+                clearTimeout(timer);
+                resolve();
+            };
+            const onChange = () => {
+                if (pc.iceGatheringState === 'complete') done();
+            };
+            const timer = setTimeout(() => {
+                logToDiagnostics('ICE gathering not complete after ' + timeoutMs + 'ms, sending what we have.');
+                done();
+            }, timeoutMs);
+            pc.addEventListener('icegatheringstatechange', onChange);
+        });
+    }
+
     function updateStatus(text, color) {
         connectionStatus.textContent = `● ${text}`;
         connectionStatus.style.color = color;
@@ -151,6 +174,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             peer.createOffer().then(offer => {
                 return peer.setLocalDescription(offer);
+            }).then(() => {
+                // We don't trickle candidates, so let gathering finish and send
+                // them all inside the SDP instead of racing it.
+                return waitForIceGathering(peer);
             }).then(() => {
                 logToDiagnostics('Sending offer: ' + peer.localDescription);
                 ws.send(JSON.stringify({ type: 'offer', data: peer.localDescription }));
