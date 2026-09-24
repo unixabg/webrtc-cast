@@ -15,8 +15,30 @@ const CLOCK_ENABLED_FILE = path.join(__dirname, '../clock.enabled');
 const LISTENING_DISABLED_FILE = path.join(__dirname, '../listening.disabled'); // Define the path for the listening.disabled file
 const NETWORK_TEST_URL_FILE = path.join(__dirname, '../network_test_url.txt'); // Store in ./ directory
 const PASSWORD_FILE = path.join(__dirname, '../password.txt'); // Store password in ./ directory
-const TOKEN_SECRET = 'your_secret'; // Use a secret for token generation
-const validTokens = new Set(); // Store valid tokens in memory
+const validTokens = new Map(); // token -> expiry time (ms), kept in memory
+const TOKEN_LIFETIME_MS = 8 * 60 * 60 * 1000; // setup logins last 8 hours
+const MAX_LOGIN_FAILURES = 5; // failed logins allowed per IP before a lockout
+const LOGIN_LOCKOUT_MS = 5 * 60 * 1000; // lockout length after too many failures
+const loginFailures = new Map(); // ip -> { count, lockedUntil }
+const DEFAULT_PASSWORD = 'webrtc-cast'; // what ships in password.txt
+
+function isTokenValid(token) {
+    if (!token || !validTokens.has(token)) {
+        return false;
+    }
+    if (Date.now() > validTokens.get(token)) {
+        validTokens.delete(token); // expired
+        return false;
+    }
+    return true;
+}
+
+// Compare passwords in constant time (hash first so lengths match).
+function passwordMatches(entered, actual) {
+    const a = crypto.createHash('sha256').update(String(entered)).digest();
+    const b = crypto.createHash('sha256').update(String(actual)).digest();
+    return crypto.timingSafeEqual(a, b);
+}
 const DEFAULT_URL_FILE = path.join(__dirname, '../default_url.txt');
 
 
@@ -32,6 +54,15 @@ const httpsServer = https.createServer(serverOptions, app);
 if (fs.existsSync(CASTING_ACTIVE_FILE)) {
     fs.unlinkSync(CASTING_ACTIVE_FILE);
     console.log('Removed stale casting.active file on startup.');
+}
+
+// Warn if the setup password is still the one published in the repository.
+try {
+    if (fs.readFileSync(PASSWORD_FILE, 'utf8').trim() === DEFAULT_PASSWORD) {
+        console.warn(`WARNING: ${PASSWORD_FILE} still has the default setup password. Change it.`);
+    }
+} catch (err) {
+    console.warn(`WARNING: could not read ${PASSWORD_FILE}: ${err.message}`);
 }
 
 // Serve welcomeclient.html at the root URL
@@ -69,7 +100,7 @@ app.get('/get-default-url', (req, res) => {
 // Middleware to check for token
 function checkToken(req, res, next) {
     const token = req.headers['x-token'];
-    if (token && validTokens.has(token)) {
+    if (isTokenValid(token)) {
         next();
     } else {
         res.status(401).send('<html><body><h1>Unauthorized</h1><p>You must provide the correct token.</p></body></html>');
@@ -122,16 +153,30 @@ app.get('/setup', (req, res) => {
 
 // Handle login and generate token
 app.post('/login', (req, res) => {
+    const clientIp = req.socket.remoteAddress;
+    const failures = loginFailures.get(clientIp);
+    if (failures && failures.lockedUntil > Date.now()) {
+        const minutes = Math.ceil((failures.lockedUntil - Date.now()) / 60000);
+        console.log(`Login blocked for ${clientIp}: too many failed attempts.`);
+        return res.status(429).send(`Too many failed logins. Try again in ${minutes} minute(s).`);
+    }
+
     const password = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
     const enteredPassword = req.body.password;
 
-    if (enteredPassword && enteredPassword === password) {
+    if (enteredPassword && passwordMatches(enteredPassword, password)) {
+        loginFailures.delete(clientIp);
         const token = crypto.randomBytes(16).toString('hex');
-        validTokens.add(token);
+        validTokens.set(token, Date.now() + TOKEN_LIFETIME_MS);
         console.log('Login successful, token generated');
         res.json({ token });
     } else {
-        console.log('Login failed');
+        // Start counting again once a previous lockout has run out.
+        const previous = (failures && !failures.lockedUntil) ? failures.count : 0;
+        const count = previous + 1;
+        const lockedUntil = count >= MAX_LOGIN_FAILURES ? Date.now() + LOGIN_LOCKOUT_MS : 0;
+        loginFailures.set(clientIp, { count, lockedUntil });
+        console.log(`Login failed from ${clientIp} (${count}/${MAX_LOGIN_FAILURES})`);
         res.status(401).send('Unauthorized: You must provide the correct password.');
     }
 });
@@ -139,7 +184,7 @@ app.post('/login', (req, res) => {
 // Check token validity
 app.get('/check-token', (req, res) => {
     const token = req.headers['x-token'];
-    if (token && validTokens.has(token)) {
+    if (isTokenValid(token)) {
         res.json({ valid: true });
     } else {
         res.status(401).json({ valid: false });

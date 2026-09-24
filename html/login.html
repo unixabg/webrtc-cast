@@ -23,7 +23,13 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ password })
-            }).then(response => response.json())
+            }).then(async response => {
+                  // Show the server's message (wrong password or lockout) on failure.
+                  if (!response.ok) {
+                      throw new Error(await response.text());
+                  }
+                  return response.json();
+              })
               .then(data => {
                   if (data.token) {
                       window.location.href = `/setup-protected?token=${data.token}`;
@@ -32,7 +38,7 @@
                   }
               }).catch(error => {
                   console.error('Error:', error);
-                  alert('Unauthorized: You must provide the correct password.');
+                  alert(error.message || 'Unauthorized: You must provide the correct password.');
               });
         });
     </script>
