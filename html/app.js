@@ -194,9 +194,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (retryCount === 0) { // Only prompt for the stream if it's the first attempt
-            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+            // Cap the capture at 1080p/30fps. High-DPI Chromebooks otherwise send
+            // their full native size (e.g. 2256x1504) and WebRTC softens it under
+            // load; the aspect ratio is preserved, only oversize screens shrink.
+            const displayMediaOptions = {
+                video: {
+                    width: { max: 1920 },
+                    height: { max: 1080 },
+                    frameRate: { ideal: 30, max: 30 }
+                },
+                audio: true
+            };
+            navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
                 .then(stream => {
                     currentStream = stream;
+
+                    // Screens are mostly text and slides: tell the encoder to keep
+                    // resolution/sharpness and drop frame rate first when squeezed.
+                    stream.getVideoTracks().forEach(track => {
+                        if ('contentHint' in track) {
+                            track.contentHint = 'detail';
+                        }
+                        const s = track.getSettings();
+                        logToDiagnostics(`Capturing ${s.width}x${s.height} @ ${s.frameRate}fps`);
+                    });
                     video.srcObject = stream;
 
                     // Handle the browser UI stop action
