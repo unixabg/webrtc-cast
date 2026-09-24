@@ -91,6 +91,7 @@
                 Waiting for stream...
             </span>
             <span id="versionInfo" style="margin-left: 5px; font-size: 0.9em; color: grey;">version</span>
+            <span id="resolutionInfo" style="margin-left: 8px; font-size: 0.9em; color: grey;"></span>
         </div>
     </div>
 <!-- Clock overlay (shown only when /check-clock-enabled says true) -->
@@ -125,6 +126,24 @@
                     console.error('Error fetching version:', error);
                     versionInfo.textContent = 'Error fetching version';
                 });
+
+            // Show "source WxH -> display WxH" so a scaling complaint can be
+            // triaged from the room: mismatched shapes letterbox, and an odd
+            // display size usually means the projector EDID/mode is off.
+            const resolutionInfo = document.getElementById('resolutionInfo');
+            function updateResolutionInfo() {
+                const dpr = window.devicePixelRatio || 1;
+                const dispW = Math.round(window.innerWidth * dpr);
+                const dispH = Math.round(window.innerHeight * dpr);
+                const srcW = remoteVideo.videoWidth;
+                const srcH = remoteVideo.videoHeight;
+                const src = (srcW && srcH) ? `${srcW}×${srcH}` : '?';
+                resolutionInfo.textContent = `src ${src} → disp ${dispW}×${dispH}`;
+            }
+            remoteVideo.addEventListener('loadedmetadata', updateResolutionInfo);
+            remoteVideo.addEventListener('resize', updateResolutionInfo); // fires when the cast resolution changes
+            window.addEventListener('resize', updateResolutionInfo);
+            updateResolutionInfo();
             function tryLoadDefaultUrl() {
                 const video = document.getElementById('remoteVideo');
                 const iframe = document.getElementById('defaultIframe');
@@ -182,6 +201,7 @@
 
             window.isPlaying = false; // Flag to manage play state
             let lastPongTimestamp = Date.now();
+            let connectionCheckTimer = null;
 
             const checkConnection = () => {
                 if (Date.now() - lastPongTimestamp > 10000) { // 10 seconds without a pong
@@ -313,7 +333,12 @@
                 console.log('Message received:', message.type);
                 switch (message.type) {
                     case 'ping':
-                        setInterval(checkConnection, 5000); // Once a client pings us check the connectivity
+                        // Once a client pings us check the connectivity. Start the
+                        // watchdog only once; pings arrive every 5s and a new
+                        // interval per ping piled up timers for the whole cast.
+                        if (!connectionCheckTimer) {
+                            connectionCheckTimer = setInterval(checkConnection, 5000);
+                        }
                         console.log('Received ping from a client station.');
                         ws.send(JSON.stringify({ type: 'pong', data: 'Station with listening-chrome.html is alive.' }));
                         lastPongTimestamp = Date.now();
