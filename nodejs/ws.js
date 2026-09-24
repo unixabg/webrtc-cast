@@ -1,7 +1,7 @@
 const fs = require('fs');
 const https = require('https');
 const WebSocket = require('ws');
-const { exec } = require('child_process');
+const { exec, execFile, spawn } = require('child_process');
 const path = require('path');
 const express = require('express');
 const crypto = require('crypto');
@@ -76,6 +76,40 @@ function checkToken(req, res, next) {
     }
 }
 
+// --- Input validation and shell-free helpers for the setup endpoints ---
+// Setup values are never pasted into a shell command line. Commands run via
+// execFile (argument list, no shell) and file contents go to `sudo tee` on
+// stdin, so quotes, ;, $(), backticks or newlines in a value can't run anything.
+
+// RFC 1123 host label: letters, digits and hyphens, 1-63 chars, no leading/trailing hyphen.
+function isValidHostname(name) {
+    return typeof name === 'string' && /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(name);
+}
+
+// SSID: 1-32 characters, no control characters (a newline would inject config lines).
+function isValidSsid(ssid) {
+    return typeof ssid === 'string' && ssid.length >= 1 && Buffer.byteLength(ssid, 'utf8') <= 32 &&
+        !/[\x00-\x1f\x7f]/.test(ssid) && ssid.trim() === ssid;
+}
+
+// WPA passphrase: 8-63 printable ASCII characters, or a 64-digit hex key.
+function isValidPsk(psk) {
+    return typeof psk === 'string' &&
+        (/^[\x20-\x7e]{8,63}$/.test(psk) || /^[0-9A-Fa-f]{64}$/.test(psk));
+}
+
+// Write content to a root-owned file through `sudo tee` without a shell.
+function sudoWriteFile(filePath, content, callback) {
+    const child = spawn('sudo', ['tee', filePath], { stdio: ['pipe', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', err => callback(err));
+    child.on('close', code => {
+        callback(code === 0 ? null : new Error(stderr.trim() || `sudo tee exited with ${code}`));
+    });
+    child.stdin.end(content);
+}
+
 // Function to check if a file exists
 function fileExists(filePath) {
     return fs.existsSync(filePath); // This will return true if the file exists, false otherwise
@@ -132,8 +166,12 @@ app.get('/setup-protected', (req, res) => {
 // Setup actions protected by token
 app.post('/set-hostname', checkToken, (req, res) => {
     const newHostname = req.body.hostname;
+    if (!isValidHostname(newHostname)) {
+        console.log('Rejected invalid hostname.');
+        return res.status(400).send('Invalid hostname: use 1-63 letters, digits or hyphens (not starting or ending with a hyphen).');
+    }
     console.log(`Setting new hostname to: ${newHostname}`);
-    exec(`sudo hostnamectl set-hostname ${newHostname}`, (error, stdout, stderr) => {
+    execFile('sudo', ['hostnamectl', 'set-hostname', newHostname], (error, stdout, stderr) => {
         if (error) {
             res.status(500).send(`Error: ${error.message}`);
         } else {
@@ -236,13 +274,21 @@ app.get('/get-hostname', (req, res) => {
 app.get('/setup-wifi', checkToken, (req, res) => {
     const ssid = req.query.ssid;
     const psk = req.query.psk;
-    console.log(`Setting up Station WiFi with SSID: ${ssid}`);
-    exec(`sudo tee /etc/network/interfaces.d/wlan0 << 'EOF'
-allow-hotplug wlan0
-iface wlan0 inet dhcp
-wpa-ssid ${ssid}
-wpa-psk ${psk}
-EOF`, (error, stdout, stderr) => {
+    if (!isValidSsid(ssid)) {
+        return res.status(400).send('Invalid SSID: 1-32 characters, no control characters or leading/trailing spaces.');
+    }
+    if (!isValidPsk(psk)) {
+        return res.status(400).send('Invalid PSK: 8-63 printable characters, or a 64-digit hex key.');
+    }
+    console.log(`Setting up Station WiFi with SSID: ${JSON.stringify(ssid)}`); // never log the PSK
+    const config = [
+        'allow-hotplug wlan0',
+        'iface wlan0 inet dhcp',
+        `wpa-ssid ${ssid}`,
+        `wpa-psk ${psk}`,
+        ''
+    ].join('\n');
+    sudoWriteFile('/etc/network/interfaces.d/wlan0', config, (error) => {
         if (error) {
             res.status(500).send(`Error setting up station WiFi: ${error.message}`);
             console.log(`Error setting up station WiFi: ${error.message}`);
@@ -256,14 +302,34 @@ EOF`, (error, stdout, stderr) => {
 app.get('/setup-ap', checkToken, (req, res) => {
     const ap_ssid = req.query.ap_ssid;
     const ap_psk = req.query.ap_psk;
-    console.log(`Setting up AP WiFi with SSID: ${ap_ssid}`);
-    exec(`sudo sed -i 's/^ssid=.*/ssid=${ap_ssid}/; s/^wpa_passphrase=.*/wpa_passphrase=${ap_psk}/' /etc/hostapd/hostapd.conf`, (error, stdout, stderr) => {
-        if (error) {
-            res.status(500).send(`Error setting up AP WiFi: ${error.message}`);
-            console.log(`Error setting up AP WiFi: ${error.message}`);
-        } else {
-            res.send('AP WiFi setup successful!');
+    if (!isValidSsid(ap_ssid)) {
+        return res.status(400).send('Invalid SSID: 1-32 characters, no control characters or leading/trailing spaces.');
+    }
+    // hostapd's wpa_passphrase must be 8-63 characters (a 64-hex key goes in wpa_psk instead).
+    if (!isValidPsk(ap_psk) || ap_psk.length > 63) {
+        return res.status(400).send('Invalid PSK: 8-63 printable characters.');
+    }
+    console.log(`Setting up AP WiFi with SSID: ${JSON.stringify(ap_ssid)}`); // never log the PSK
+    const HOSTAPD_CONF = '/etc/hostapd/hostapd.conf';
+    // Read with sudo (like the old sed did) in case hostapd.conf isn't world-readable.
+    execFile('sudo', ['cat', HOSTAPD_CONF], (readError, current) => {
+        if (readError) {
+            console.log(`Error reading ${HOSTAPD_CONF}: ${readError.message}`);
+            return res.status(500).send(`Error reading ${HOSTAPD_CONF}: ${readError.message}`);
         }
+        // Same edit the old sed did (replace the ssid= and wpa_passphrase= lines), done
+        // in JS. Replacer functions keep $ in a value from being treated as a pattern.
+        const updated = current
+            .replace(/^ssid=.*$/m, () => `ssid=${ap_ssid}`)
+            .replace(/^wpa_passphrase=.*$/m, () => `wpa_passphrase=${ap_psk}`);
+        sudoWriteFile(HOSTAPD_CONF, updated, (error) => {
+            if (error) {
+                res.status(500).send(`Error setting up AP WiFi: ${error.message}`);
+                console.log(`Error setting up AP WiFi: ${error.message}`);
+            } else {
+                res.send('AP WiFi setup successful!');
+            }
+        });
     });
 });
 
