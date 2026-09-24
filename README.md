@@ -63,6 +63,58 @@ Streaming Status
 * To access the setup page go to the url 
 https://ipAddressOfCast:8443/setup and enter the password.
 
+### Display and Scaling Troubleshooting
+Projectors vary a lot, so when someone reports the cast "not scaling right"
+start here.
+
+#### Resolution readout
+The status box on the kiosk screen shows the version followed by
+`src WxH → disp WxH`:
+* `src` is the resolution being cast from the Chromebook or other device.
+* `disp` is the resolution the kiosk is driving the projector at.
+
+The whole cast screen is always shown. If `src` and `disp` have different
+shapes (for example 16:9 on a 4:3 projector) you get black bars, which is
+expected. If `disp` looks wrong for the projector (for example 1024×768 on a
+projector that should be 1280×800), the projector is probably reporting a bad
+mode list; see Pinning a display mode below.
+
+#### Checking a unit over SSH
+* Display mode X is using, and what the projector advertises
+(`*` = current, `+` = preferred):
+
+`sudo -u kiosk DISPLAY=:0 xrandr -q`
+
+* Version the server is serving:
+
+`curl -sk https://localhost:8443/version.txt`
+
+If the current mode is not the projector's real native resolution, or the
+list is short and odd (only 1024×768, for example), the projector's EDID is
+wrong or not getting through. HDMI switches, extenders and long cable runs
+are common causes.
+
+#### Pinning a display mode
+To force a resolution on a unit, create `display_mode.txt` in the
+webrtc-cast directory with one line:
+* `1280x800` - that mode on every connected output
+* `1920x1080 60` - with a refresh rate
+* `HDMI-1 1280x800` - only on the named output (names come from `xrandr -q`)
+
+If the display doesn't list that mode it is created with `cvt`. Delete the
+file to go back to the default. The kiosk launcher applies it with
+`contrib/display-mode.sh` before chromium starts, so restart lightdm or
+reboot after changing it. Launchers installed by `contrib/kiosk-install.sh`
+already call it; an older or custom launcher needs this line added after the
+`xset` lines in `/usr/bin/kiosk`:
+
+`sh /home/kiosk/webrtc-cast/contrib/display-mode.sh`
+
+#### TVs cutting off the edges
+If the unit drives a TV and the edges are cut off even though the readout
+looks right, the TV is overscanning. Set the TV's picture size to
+"Just Scan", "Screen Fit", "1:1" or similar.
+
 ### Old Notes
 * Clone the project.
 * Move to the cloned directory: `cd webrtc-cast`
