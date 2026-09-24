@@ -61,6 +61,9 @@ xset -dpms
 xset s off
 xset s noblank
 
+# Optionally pin the output resolution (see contrib/display-mode.sh)
+sh /home/kiosk/webrtc-cast/contrib/display-mode.sh
+
 # Start WebRTC-cast server
 echo "Starting the WebRTC-cast services ..."
 cd /home/kiosk/webrtc-cast
