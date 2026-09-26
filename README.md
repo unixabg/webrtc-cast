@@ -115,6 +115,37 @@ If the unit drives a TV and the edges are cut off even though the readout
 looks right, the TV is overscanning. Set the TV's picture size to
 "Just Scan", "Screen Fit", "1:1" or similar.
 
+### Access Point (optional, Debian trixie)
+`contrib/ap-setup.sh` turns a Wi-Fi card on the cast station into an access
+point, so clients that know the passphrase can join it and browse to
+`https://cast:8443`. It has not been tested on hardware yet.
+
+* Check a card first (AP mode, and managed+AP at once with `--shared`):
+
+`sudo contrib/ap-setup.sh check --iface wlx00c0ca123456`
+
+* Dedicated card for the AP (most reliable; a second USB card, or the
+built-in card when the station is wired):
+
+`sudo contrib/ap-setup.sh install --iface wlx00c0ca123456 --ssid "Room 114 Cast" --passphrase 'secret-pass'`
+
+* One card shared with the station's Wi-Fi uplink (`--shared` creates a
+virtual `ap0`; the AP follows the uplink's channel when hostapd starts):
+
+`sudo contrib/ap-setup.sh install --iface wlp2s0 --shared --ssid "Room 114 Cast" --passphrase 'secret-pass'`
+
+* Remove it again: `sudo contrib/ap-setup.sh uninstall` (add `--purge` to
+also remove the hostapd and dnsmasq packages).
+
+By default AP clients can only reach the cast station (no gateway, clients
+isolated from each other). `--forward <uplink>` adds NAT so they also get
+the uplink's network. See `contrib/ap-setup.sh --help` for all options
+(address/subnet, DHCP range, band, channel, country, DNS alias).
+
+Cards: in-kernel MediaTek (mt76, e.g. MT7612U, MT7921AU) and Atheros
+(ath9k_htc, AR9271) work well in AP mode. Intel cards usually only do AP on
+2.4 GHz. Avoid Realtek USB cards that need out-of-tree drivers.
+
 ### Old Notes
 * Clone the project.
 * Move to the cloned directory: `cd webrtc-cast`
