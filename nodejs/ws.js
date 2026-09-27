@@ -251,28 +251,6 @@ app.post('/restart-lightdm', checkToken, (req, res) => {
     });
 });
 
-// Endpoint to get Station AP settings with token protection
-app.get('/station-ap-settings', checkToken, (req, res) => {
-    fs.readFile('/etc/network/interfaces.d/wlan0', 'utf8', (err, data) => {
-        if (err) {
-            res.status(500).send(`Error reading Station AP settings: ${err.message}`);
-        } else {
-            res.send(data);
-        }
-    });
-});
-
-// Endpoint to get HostAPD settings with token protection
-app.get('/hostapd-settings', checkToken, (req, res) => {
-    fs.readFile('/etc/hostapd/hostapd.conf', 'utf8', (err, data) => {
-        if (err) {
-            res.status(500).send(`Error reading HostAPD settings: ${err.message}`);
-        } else {
-            res.send(data);
-        }
-    });
-});
-
 // Save network test URL protected by token
 app.post('/save-network-test-url', checkToken, (req, res) => {
     const url = req.body.networkTestUrl || 'https://www.google.com';
@@ -315,67 +293,290 @@ app.get('/get-hostname', (req, res) => {
     });
 });
 
-// Setup WiFi endpoint protected by token
-app.get('/setup-wifi', checkToken, (req, res) => {
-    const ssid = req.query.ssid;
-    const psk = req.query.psk;
-    if (!isValidSsid(ssid)) {
-        return res.status(400).send('Invalid SSID: 1-32 characters, no control characters or leading/trailing spaces.');
+// --- Wi-Fi station and access point -------------------------------------
+// The access point is installed and configured by contrib/ap-setup.sh; the
+// setup page only shows its status. The station (the unit's own Wi-Fi
+// connection) is an ifupdown stanza for the station card, applied right away.
+
+const AP_CONFIG_FILE = '/etc/default/webrtc-cast-ap';
+const AP_SETUP_TOOL = '/usr/local/sbin/webrtc-cast-ap';
+
+function isValidIfname(name) {
+    return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,15}$/.test(name);
+}
+
+// The server runs as the kiosk user, whose PATH has no /usr/sbin (iw, ifup
+// and friends live there), so give the tools we run a full system PATH.
+const SYSTEM_ENV = { ...process.env, PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' };
+
+// execFile as a promise; never rejects.
+function runFile(cmd, args, timeout = 15000) {
+    return new Promise(resolve => {
+        execFile(cmd, args, { timeout, maxBuffer: 1024 * 1024, env: SYSTEM_ENV }, (error, stdout, stderr) => {
+            resolve({ ok: !error, stdout: stdout || '', stderr: stderr || '', error });
+        });
+    });
+}
+
+// /etc/default/webrtc-cast-ap (KEY=VALUE lines) or null when no AP is installed.
+function readApConfig() {
+    let text;
+    try {
+        text = fs.readFileSync(AP_CONFIG_FILE, 'utf8');
+    } catch (err) {
+        return null;
     }
-    if (!isValidPsk(psk)) {
-        return res.status(400).send('Invalid PSK: 8-63 printable characters, or a 64-digit hex key.');
+    const cfg = {};
+    for (const line of text.split('\n')) {
+        const m = line.match(/^([A-Z_]+)=(.*)$/);
+        if (m) cfg[m[1]] = m[2].trim();
     }
-    console.log(`Setting up Station WiFi with SSID: ${JSON.stringify(ssid)}`); // never log the PSK
-    const config = [
-        'allow-hotplug wlan0',
-        'iface wlan0 inet dhcp',
-        `wpa-ssid ${ssid}`,
-        `wpa-psk ${psk}`,
-        ''
-    ].join('\n');
-    sudoWriteFile('/etc/network/interfaces.d/wlan0', config, (error) => {
-        if (error) {
-            res.status(500).send(`Error setting up station WiFi: ${error.message}`);
-            console.log(`Error setting up station WiFi: ${error.message}`);
-        } else {
-            res.send('Station WiFi setup successful!');
+    return cfg;
+}
+
+function wirelessIfaces() {
+    try {
+        return fs.readdirSync('/sys/class/net').filter(name =>
+            isValidIfname(name) &&
+            (fs.existsSync(`/sys/class/net/${name}/wireless`) || fs.existsSync(`/sys/class/net/${name}/phy80211`)));
+    } catch (err) {
+        return [];
+    }
+}
+
+// The card the station uses: the shared card in --shared mode, otherwise a
+// Wi-Fi card that isn't the AP (e.g. the built-in card next to a USB AP card).
+function stationIface(cfg) {
+    if (cfg && cfg.MODE === 'shared') {
+        return isValidIfname(cfg.IFACE) ? cfg.IFACE : null;
+    }
+    const apIface = cfg ? cfg.AP_IFACE : null;
+    return wirelessIfaces().find(name => name !== apIface) || null;
+}
+
+function stationConfigPath(iface) {
+    return `/etc/network/interfaces.d/${iface}`;
+}
+
+function freqToChannel(freq) {
+    const f = Math.round(Number(freq));
+    if (f === 2484) return 14;
+    if (f >= 2412 && f <= 2472) return (f - 2407) / 5;
+    if (f >= 5000 && f < 5925) return (f - 5000) / 5;
+    return null;
+}
+
+function bandOf(freq) {
+    const f = Number(freq);
+    return f < 3000 ? '2.4 GHz' : (f < 5925 ? '5 GHz' : '6 GHz');
+}
+
+// iw prints unprintable SSID bytes as \xNN
+function decodeIwSsid(s) {
+    return s.replace(/\\x([0-9a-fA-F]{2})/g, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+async function stationLink(iface) {
+    const r = await runFile('iw', ['dev', iface, 'link']);
+    const ssid = (r.stdout.match(/^\s*SSID: (.*)$/m) || [])[1];
+    const freq = (r.stdout.match(/^\s*freq: ([0-9.]+)/m) || [])[1];
+    if (!r.ok || !freq) return { connected: false };
+    return { connected: true, ssid: ssid ? decodeIwSsid(ssid) : '', band: bandOf(freq), channel: freqToChannel(freq) };
+}
+
+async function ipv4Of(iface) {
+    const r = await runFile('ip', ['-4', '-o', 'addr', 'show', 'dev', iface]);
+    return (r.stdout.match(/inet ([0-9.]+\/[0-9]+)/) || [])[1] || '';
+}
+
+// Run a station change detached from this server (via systemd-run), so it
+// finishes even though the AP (and maybe this page's connection) goes away.
+// $1 = station card, $2 = 1 when the AP shares the card and must be paused.
+function startStationJob(name, script, iface, shared) {
+    const unit = `webrtc-cast-${name}-${Date.now()}`;
+    execFile('sudo', ['systemd-run', '--collect', '--quiet', '--unit', unit, '--',
+        '/bin/sh', '-c', script, 'sh', iface, shared ? '1' : '0'], { env: SYSTEM_ENV }, (error) => {
+        if (error) console.error(`Failed to start ${unit}: ${error.message}`);
+        else console.log(`Started ${unit} for ${iface}.`);
+    });
+}
+
+const STATION_CONNECT_SCRIPT =
+    'ifdown --force "$1" >/dev/null 2>&1; ' +
+    'if [ "$2" = 1 ]; then systemctl stop hostapd; fi; ' +
+    'timeout 60 ifup "$1"; rc=$?; ' +
+    // hostapd picks its channel from the station's when it starts (ap-setup.sh)
+    'if [ "$2" = 1 ]; then systemctl start hostapd; fi; ' +
+    'exit $rc';
+
+const STATION_FORGET_SCRIPT =
+    'ifdown --force "$1" >/dev/null 2>&1; ' +
+    'rm -f "/etc/network/interfaces.d/$1"; ' +
+    'if [ "$2" = 1 ]; then systemctl restart hostapd; fi; ' +
+    'exit 0';
+
+// Access point status (read-only)
+app.get('/ap-status', checkToken, async (req, res) => {
+    const cfg = readApConfig();
+    if (!cfg) {
+        return res.json({ installed: false });
+    }
+    const apIface = isValidIfname(cfg.AP_IFACE) ? cfg.AP_IFACE : '';
+    const conf = (await runFile('sudo', ['cat', '/etc/hostapd/hostapd.conf'])).stdout;
+    const confValue = key => ((conf.match(new RegExp(`^${key}=(.*)$`, 'm')) || [])[1] || '').trim();
+    const services = {};
+    const active = await runFile('systemctl', ['is-active', 'webrtc-cast-ap', 'hostapd', 'dnsmasq']);
+    ['webrtc-cast-ap', 'hostapd', 'dnsmasq'].forEach((name, i) => {
+        services[name] = (active.stdout.split('\n')[i] || 'unknown').trim();
+    });
+    let channel = null, band = '', clients = null;
+    if (apIface) {
+        const info = await runFile('iw', ['dev', apIface, 'info']);
+        const m = info.stdout.match(/channel (\d+) \(([0-9.]+) MHz\)/);
+        if (m) {
+            channel = Number(m[1]);
+            band = bandOf(m[2]);
         }
+        const dump = await runFile('sudo', ['iw', 'dev', apIface, 'station', 'dump']);
+        if (dump.ok) clients = (dump.stdout.match(/^Station /gm) || []).length;
+    }
+    let names = [];
+    try {
+        const dns = fs.readFileSync('/etc/dnsmasq.d/webrtc-cast-ap.conf', 'utf8');
+        names = [...dns.matchAll(/^address=\/([^/]+)\//gm)].map(m => m[1]);
+    } catch (err) { /* not readable: leave empty */ }
+    res.json({
+        installed: true,
+        mode: cfg.MODE || '',
+        card: cfg.IFACE || '',
+        apIface,
+        address: cfg.AP_ADDRESS || '',
+        forward: cfg.FORWARD === '1',
+        ssid: confValue('ssid'),
+        channel,
+        band,
+        configuredChannel: confValue('channel'),
+        services,
+        clients,
+        names
     });
 });
 
-// Setup AP WiFi endpoint protected by token
-app.get('/setup-ap', checkToken, (req, res) => {
-    const ap_ssid = req.query.ap_ssid;
-    const ap_psk = req.query.ap_psk;
-    if (!isValidSsid(ap_ssid)) {
-        return res.status(400).send('Invalid SSID: 1-32 characters, no control characters or leading/trailing spaces.');
+// Plain-text card report from ap-setup.sh check (for screenshots / support)
+app.get('/ap-card-report', checkToken, async (req, res) => {
+    const cfg = readApConfig();
+    const iface = cfg && isValidIfname(cfg.IFACE) ? cfg.IFACE : (wirelessIfaces()[0] || '');
+    if (!iface) {
+        return res.type('text/plain').send('No Wi-Fi card found.');
     }
-    // hostapd's wpa_passphrase must be 8-63 characters (a 64-hex key goes in wpa_psk instead).
-    if (!isValidPsk(ap_psk) || ap_psk.length > 63) {
-        return res.status(400).send('Invalid PSK: 8-63 printable characters.');
-    }
-    console.log(`Setting up AP WiFi with SSID: ${JSON.stringify(ap_ssid)}`); // never log the PSK
-    const HOSTAPD_CONF = '/etc/hostapd/hostapd.conf';
-    // Read with sudo (like the old sed did) in case hostapd.conf isn't world-readable.
-    execFile('sudo', ['cat', HOSTAPD_CONF], (readError, current) => {
-        if (readError) {
-            console.log(`Error reading ${HOSTAPD_CONF}: ${readError.message}`);
-            return res.status(500).send(`Error reading ${HOSTAPD_CONF}: ${readError.message}`);
-        }
-        // Same edit the old sed did (replace the ssid= and wpa_passphrase= lines), done
-        // in JS. Replacer functions keep $ in a value from being treated as a pattern.
-        const updated = current
-            .replace(/^ssid=.*$/m, () => `ssid=${ap_ssid}`)
-            .replace(/^wpa_passphrase=.*$/m, () => `wpa_passphrase=${ap_psk}`);
-        sudoWriteFile(HOSTAPD_CONF, updated, (error) => {
-            if (error) {
-                res.status(500).send(`Error setting up AP WiFi: ${error.message}`);
-                console.log(`Error setting up AP WiFi: ${error.message}`);
-            } else {
-                res.send('AP WiFi setup successful!');
-            }
+    const tool = fs.existsSync(AP_SETUP_TOOL) ? AP_SETUP_TOOL : path.join(__dirname, '../contrib/ap-setup.sh');
+    const args = [tool, 'check', '--iface', iface];
+    if (!cfg || cfg.MODE === 'shared') args.push('--shared');
+    const r = await runFile('bash', args, 30000);
+    res.type('text/plain').send((r.stdout + r.stderr).trim() || 'The card check produced no output.');
+});
+
+// Station status
+app.get('/station-status', checkToken, async (req, res) => {
+    const cfg = readApConfig();
+    const iface = stationIface(cfg);
+    if (!iface) {
+        return res.json({
+            available: false,
+            reason: cfg && cfg.MODE === 'dedicated'
+                ? 'The Wi-Fi card is used only for the access point (dedicated mode).'
+                : 'No Wi-Fi card found.'
         });
+    }
+    const saved = (await runFile('sudo', ['cat', stationConfigPath(iface)])).stdout;
+    const configuredSsid = ((saved.match(/^\s*wpa-ssid (.*)$/m) || [])[1] || '').trim();
+    const link = await stationLink(iface);
+    res.json({
+        available: true,
+        iface,
+        sharedWithAp: !!(cfg && cfg.MODE === 'shared'),
+        configuredSsid,
+        ...link,
+        ip: link.connected ? await ipv4Of(iface) : ''
     });
+});
+
+// Nearby networks for the station card
+app.get('/station-scan', checkToken, async (req, res) => {
+    const iface = stationIface(readApConfig());
+    if (!iface) {
+        return res.status(400).json({ error: 'No Wi-Fi card is available for the station.' });
+    }
+    await runFile('sudo', ['ip', 'link', 'set', 'dev', iface, 'up']);
+    let r = await runFile('sudo', ['iw', 'dev', iface, 'scan'], 25000);
+    let cached = false;
+    if (!r.ok) {
+        // e.g. busy while the AP runs on the same radio: use the last results
+        r = await runFile('sudo', ['iw', 'dev', iface, 'scan', 'dump'], 10000);
+        cached = true;
+    }
+    const best = new Map();
+    for (const block of r.stdout.split(/^BSS /m).slice(1)) {
+        const ssidRaw = (block.match(/^\s*SSID: (.*)$/m) || [])[1];
+        const freq = (block.match(/^\s*freq: ([0-9.]+)/m) || [])[1];
+        const signal = Number((block.match(/^\s*signal: (-?[0-9.]+)/m) || [])[1]);
+        if (!ssidRaw || !freq) continue; // hidden network or incomplete entry
+        const ssid = decodeIwSsid(ssidRaw);
+        const entry = { ssid, band: bandOf(freq), channel: freqToChannel(freq), signal: Number.isFinite(signal) ? Math.round(signal) : null };
+        const key = `${ssid}|${entry.band}`;
+        if (!best.has(key) || (entry.signal ?? -999) > (best.get(key).signal ?? -999)) best.set(key, entry);
+    }
+    const networks = [...best.values()].sort((a, b) => (b.signal ?? -999) - (a.signal ?? -999));
+    res.json({ networks, cached, error: !r.ok ? 'Scan failed; type the network name instead.' : '' });
+});
+
+// Save the station network and connect now
+app.post('/station-connect', checkToken, (req, res) => {
+    const { ssid, psk } = req.body || {};
+    if (!isValidSsid(ssid)) {
+        return res.status(400).json({ error: 'Invalid network name: 1-32 characters, no control characters or leading/trailing spaces.' });
+    }
+    if (!isValidPsk(psk)) {
+        return res.status(400).json({ error: 'Invalid password: 8-63 printable characters, or a 64-digit hex key.' });
+    }
+    const cfg = readApConfig();
+    const iface = stationIface(cfg);
+    if (!iface) {
+        return res.status(400).json({ error: 'No Wi-Fi card is available for the station.' });
+    }
+    const shared = !!(cfg && cfg.MODE === 'shared');
+    console.log(`Station ${iface}: connecting to ${JSON.stringify(ssid)}`); // never log the password
+    const config = [
+        `allow-hotplug ${iface}`,
+        `iface ${iface} inet dhcp`,
+        `    wpa-ssid ${ssid}`,
+        `    wpa-psk ${psk}`,
+        ''
+    ].join('\n');
+    const file = stationConfigPath(iface);
+    sudoWriteFile(file, config, async (error) => {
+        if (error) {
+            console.log(`Error writing ${file}: ${error.message}`);
+            return res.status(500).json({ error: `Error saving the station settings: ${error.message}` });
+        }
+        await runFile('sudo', ['chmod', '600', file]); // it holds the Wi-Fi password
+        res.json({ ok: true, sharedWithAp: shared });
+        // Give the response a moment to reach the browser before the AP pauses.
+        setTimeout(() => startStationJob('station-connect', STATION_CONNECT_SCRIPT, iface, shared), 1000);
+    });
+});
+
+// Forget the station network
+app.post('/station-forget', checkToken, (req, res) => {
+    const cfg = readApConfig();
+    const iface = stationIface(cfg);
+    if (!iface) {
+        return res.status(400).json({ error: 'No Wi-Fi card is available for the station.' });
+    }
+    const shared = !!(cfg && cfg.MODE === 'shared');
+    console.log(`Station ${iface}: forgetting the saved network`);
+    res.json({ ok: true, sharedWithAp: shared });
+    setTimeout(() => startStationJob('station-forget', STATION_FORGET_SCRIPT, iface, shared), 1000);
 });
 
 // Reboot endpoint protected by token

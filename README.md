@@ -62,6 +62,15 @@ Streaming Status
 ./password.txt file with the password you wish.
 * To access the setup page go to the url 
 https://ipAddressOfCast:8443/setup and enter the password.
+* Station WiFi: shows the unit's own Wi-Fi connection. Scan for a network
+(or type its name), enter the password and Save & Connect; it applies right
+away. The settings go in `/etc/network/interfaces.d/<card>` (readable by root
+only). With a shared access point (`ap-setup.sh --shared`) the access point
+is off for up to a minute while the station connects, then comes back on the
+channel it picks.
+* Access Point: read-only status of an access point installed with
+`contrib/ap-setup.sh`, plus a Card report button (the `check` output).
+Changes to the access point are made with `ap-setup.sh`.
 
 ### Display and Scaling Troubleshooting
 Projectors vary a lot, so when someone reports the cast "not scaling right"

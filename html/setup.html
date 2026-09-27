@@ -22,9 +22,9 @@
             padding: 20px;
             border: 1px solid #888;
             width: 80%;
-            max-width: 600px;
+            max-width: 760px;
             max-height: 70%;
-            overflow-y: auto;
+            overflow: auto;
         }
         .close {
             color: #aaa;
@@ -37,6 +37,36 @@
             color: black;
             text-decoration: none;
             cursor: pointer;
+        }
+        .wifi-status {
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        .wifi-status td {
+            padding: 2px 10px 2px 0;
+            vertical-align: top;
+        }
+        .wifi-status td:first-child {
+            color: #555;
+            white-space: nowrap;
+        }
+        .scan-results button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            margin: 2px 0;
+            padding: 4px 6px;
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .scan-results button:hover {
+            background: #e4eefc;
+        }
+        .hint {
+            color: #666;
+            font-size: 0.9em;
         }
         .info-icon {
             display: inline-block;
@@ -110,25 +140,26 @@
     <h1>WebRTC-Cast Setup</h1>
     <table>
         <tr>
-            <td>
-                <h2>Station WiFi <span class="info-icon" onclick="fetchStationAPSettings()"></span></h2>
+            <td style="vertical-align: top;">
+                <h2>Station WiFi</h2>
+                <table id="stationStatus" class="wifi-status"><tr><td>Loading...</td></tr></table>
                 <form id="stationWifiForm">
-                    <label for="ssid">SSID:</label>
-                    <input type="text" id="ssid" name="ssid"><br><br>
-                    <label for="psk">PSK:</label>
-                    <input type="password" id="psk" name="psk"><br><br>
-                    <input type="submit" value="Submit">
+                    <label for="ssid">Network:</label>
+                    <input type="text" id="ssid" name="ssid" autocomplete="off">
+                    <button type="button" id="scanButton" onclick="scanNetworks()">Scan</button><br>
+                    <div id="scanResults" class="scan-results"></div><br>
+                    <label for="psk">Password:</label>
+                    <input type="password" id="psk" name="psk" autocomplete="new-password"><br><br>
+                    <input type="submit" id="connectButton" value="Save &amp; Connect">
+                    <button type="button" id="forgetButton" onclick="forgetStation()">Forget</button>
                 </form>
             </td>
-            <td>
-                <h2>AP WiFi <span class="info-icon" onclick="fetchHostAPDSettings()"></span></h2>
-                <form id="apWifiForm">
-                    <label for="ap_ssid">SSID:</label>
-                    <input type="text" id="ap_ssid" name="ap_ssid"><br><br>
-                    <label for="ap_psk">PSK:</label>
-                    <input type="password" id="ap_psk" name="ap_psk"><br><br>
-                    <input type="submit" value="Submit">
-                </form>
+            <td style="vertical-align: top;">
+                <h2>Access Point</h2>
+                <table id="apStatus" class="wifi-status"><tr><td>Loading...</td></tr></table>
+                <button type="button" onclick="showCardReport()">Card report</button>
+                <p class="hint">The access point is set up with contrib/ap-setup.sh.<br>
+                A screenshot of this box and the card report helps with support.</p>
             </td>
         </tr>
         <tr>
@@ -238,12 +269,190 @@
             .catch(() => false);
         }
 
+        // ---- Station WiFi and Access Point panels ----
+        let stationShared = false;
+
+        async function apiJson(url, options = {}) {
+            const response = await fetch(url, {
+                ...options,
+                headers: { 'x-token': token, ...(options.headers || {}) }
+            });
+            let data = {};
+            try { data = await response.json(); } catch (e) { /* not JSON */ }
+            if (!response.ok) {
+                throw new Error(data.error || `Request failed (${response.status})`);
+            }
+            return data;
+        }
+
+        // Fill a status table from [label, value] rows (values set as text).
+        function setRows(tableId, rows) {
+            const table = document.getElementById(tableId);
+            table.textContent = '';
+            rows.forEach(([label, value]) => {
+                const tr = table.insertRow();
+                tr.insertCell().textContent = label;
+                tr.insertCell().textContent = value;
+            });
+        }
+
+        async function loadStationStatus() {
+            const form = document.getElementById('stationWifiForm');
+            try {
+                const st = await apiJson('/station-status');
+                if (!st.available) {
+                    setRows('stationStatus', [['Status', st.reason]]);
+                    form.style.display = 'none';
+                    return;
+                }
+                form.style.display = '';
+                stationShared = st.sharedWithAp;
+                const rows = [['Card', st.iface + (st.sharedWithAp ? ' (shared with the access point)' : '')]];
+                if (st.connected) {
+                    rows.push(['Connected to', st.ssid]);
+                    rows.push(['Channel', `${st.channel} (${st.band})`]);
+                    rows.push(['Address', st.ip || 'waiting for an address...']);
+                } else {
+                    rows.push(['Status', 'Not connected']);
+                }
+                rows.push(['Saved network', st.configuredSsid || 'none']);
+                setRows('stationStatus', rows);
+                document.getElementById('forgetButton').disabled = !st.configuredSsid;
+            } catch (error) {
+                setRows('stationStatus', [['Status', `Could not read the station status: ${error.message}`]]);
+            }
+        }
+
+        async function scanNetworks() {
+            const button = document.getElementById('scanButton');
+            const results = document.getElementById('scanResults');
+            button.disabled = true;
+            button.textContent = 'Scanning...';
+            results.textContent = '';
+            try {
+                const scan = await apiJson('/station-scan');
+                if (scan.error) {
+                    results.textContent = scan.error;
+                } else if (!scan.networks.length) {
+                    results.textContent = 'No networks found; type the network name instead.';
+                } else {
+                    if (scan.cached) {
+                        const note = document.createElement('div');
+                        note.className = 'hint';
+                        note.textContent = 'Recently seen networks (a live scan was not possible right now):';
+                        results.appendChild(note);
+                    }
+                    scan.networks.forEach(net => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        const signal = net.signal === null ? '' : ` · ${net.signal} dBm`;
+                        b.textContent = `${net.ssid} · ${net.band} ch ${net.channel}${signal}`;
+                        b.onclick = () => {
+                            document.getElementById('ssid').value = net.ssid;
+                            document.getElementById('psk').focus();
+                        };
+                        results.appendChild(b);
+                    });
+                }
+            } catch (error) {
+                results.textContent = `Scan failed: ${error.message}`;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Scan';
+            }
+        }
+
+        async function connectStation() {
+            const ssid = document.getElementById('ssid').value;
+            const psk = document.getElementById('psk').value;
+            if (!ssid) {
+                alert('Enter or pick a network name.');
+                return;
+            }
+            const warning = stationShared
+                ? `The unit will now connect to "${ssid}".\n\nThe cast access point switches off for up to a minute while it connects. ` +
+                  'If you are connected through the access point, reconnect to it afterwards and reopen this page.'
+                : `The unit will now connect to "${ssid}".`;
+            if (!confirm(warning)) return;
+            try {
+                await apiJson('/station-connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid, psk })
+                });
+                document.getElementById('psk').value = '';
+                setRows('stationStatus', [['Status', `Connecting to "${ssid}"...`]]);
+                setTimeout(loadStationStatus, stationShared ? 45000 : 20000);
+                setTimeout(loadApStatus, stationShared ? 45000 : 20000);
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function forgetStation() {
+            const warning = stationShared
+                ? 'Forget the saved network? The cast access point restarts and is off for a few seconds.'
+                : 'Forget the saved network and disconnect?';
+            if (!confirm(warning)) return;
+            try {
+                await apiJson('/station-forget', { method: 'POST' });
+                setRows('stationStatus', [['Status', 'Forgetting the saved network...']]);
+                setTimeout(loadStationStatus, 15000);
+                setTimeout(loadApStatus, 15000);
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function loadApStatus() {
+            try {
+                const ap = await apiJson('/ap-status');
+                if (!ap.installed) {
+                    setRows('apStatus', [['Status', 'No access point is installed on this unit.']]);
+                    return;
+                }
+                const running = ap.services.hostapd === 'active' && ap.services.dnsmasq === 'active';
+                const down = Object.entries(ap.services).filter(([, state]) => state !== 'active')
+                    .map(([name, state]) => `${name}: ${state}`).join(', ');
+                const rows = [
+                    ['Status', running ? 'Running' : `Not running (${down})`],
+                    ['Network name', ap.ssid || '?'],
+                    ['Channel', ap.channel ? `${ap.channel} (${ap.band})` : `not on air (configured ${ap.configuredChannel || '?'})`],
+                    ['Mode', ap.mode === 'shared'
+                        ? `Shared with the station on ${ap.card}`
+                        : `Dedicated card ${ap.card}`],
+                    ['Address', ap.address]
+                ];
+                if (ap.names.length) {
+                    rows.push(['Clients browse to', ap.names.map(n => `https://${n}:8443`).join('  or  ')]);
+                }
+                rows.push(['Client internet', ap.forward ? 'Yes (through the uplink)' : 'No (casting only)']);
+                if (ap.clients !== null) rows.push(['Clients connected', String(ap.clients)]);
+                setRows('apStatus', rows);
+            } catch (error) {
+                setRows('apStatus', [['Status', `Could not read the access point status: ${error.message}`]]);
+            }
+        }
+
+        async function showCardReport() {
+            showModal('Checking the Wi-Fi card...');
+            try {
+                const response = await fetch('/ap-card-report', { headers: { 'x-token': token } });
+                showModal(await response.text());
+            } catch (error) {
+                showModal(`Could not run the card check: ${error.message}`);
+            }
+        }
+
         async function initialize() {
             if (!token || !(await checkTokenValidity())) {
                 alert('Unauthorized: No token found or token is invalid.');
                 window.location.href = '/setup';
                 return;
             }
+
+            loadStationStatus();
+            loadApStatus();
 
             setInterval(() => {
                 fetch('/check-token', {
@@ -403,34 +612,7 @@
 
         document.getElementById('stationWifiForm').addEventListener('submit', function(event) {
             event.preventDefault();
-            const ssid = document.getElementById('ssid').value;
-            const psk = document.getElementById('psk').value;
-            fetch(`/setup-wifi?ssid=${encodeURIComponent(ssid)}&psk=${encodeURIComponent(psk)}`, {
-                headers: {
-                    'x-token': token
-                }
-            })
-            .then(response => response.text())
-            .then(data => {
-                alert(data);
-            })
-            .catch(error => alert(`Error: ${error.message}`));
-        });
-
-        document.getElementById('apWifiForm').addEventListener('submit', function(event) {
-            event.preventDefault();
-            const ssid = document.getElementById('ap_ssid').value;
-            const psk = document.getElementById('ap_psk').value;
-            fetch(`/setup-ap?ap_ssid=${encodeURIComponent(ssid)}&ap_psk=${encodeURIComponent(psk)}`, {
-                headers: {
-                    'x-token': token
-                }
-            })
-            .then(response => response.text())
-            .then(data => {
-                alert(data);
-            })
-            .catch(error => alert(`Error: ${error.message}`));
+            connectStation();
         });
 
         document.getElementById('networkTestForm').addEventListener('submit', function(event) {
@@ -491,32 +673,6 @@
                 document.body.innerHTML = data;
             })
             .catch(error => console.error('Error rebooting:', error));
-        }
-
-        function fetchStationAPSettings() {
-            fetch('/station-ap-settings', {
-                headers: {
-                    'x-token': token
-                }
-            })
-            .then(response => response.text())
-            .then(data => {
-                showModal(data);
-            })
-            .catch(error => console.error('Error fetching Station AP settings:', error));
-        }
-
-        function fetchHostAPDSettings() {
-            fetch('/hostapd-settings', {
-                headers: {
-                    'x-token': token
-                }
-            })
-            .then(response => response.text())
-            .then(data => {
-                showModal(data);
-            })
-            .catch(error => console.error('Error fetching HostAPD settings:', error));
         }
 
         function restartLightDM() {
