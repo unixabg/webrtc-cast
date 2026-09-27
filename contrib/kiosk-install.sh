@@ -1,58 +1,86 @@
 #!/bin/sh
+# webrtc-cast kiosk setup for Debian 13 (trixie).
+#
+# Run as root on an installed system:
+#   sudo contrib/kiosk-install.sh
+#
+# Or from a d-i preseed late_command (runs inside the target chroot):
+#   d-i preseed/late_command string \
+#       in-target sh -c 'wget -qO /tmp/kiosk-install.sh https://raw.githubusercontent.com/unixabg/webrtc-cast/main/contrib/kiosk-install.sh \
+#         && chmod +x /tmp/kiosk-install.sh \
+#         && /tmp/kiosk-install.sh > /var/log/kiosk-setup.log 2>&1'; \
+#       true
+
+if [ "$(id -u)" != "0" ]; then
+    echo "This script must be run as root (sudo contrib/kiosk-install.sh)."
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 echo "Updating and adding some packages ..."
-apt update
-apt upgrade -y
-apt install dmidecode curl chromium git lightdm metacity nodejs npm sudo -y
+apt-get update
+apt-get -y upgrade
+
+# Pre-answer the display-manager question so lightdm can't block on debconf
+echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
+
+apt-get -y install \
+    dmidecode curl git sudo openssl ca-certificates \
+    chromium lightdm metacity \
+    xserver-xorg x11-xserver-utils \
+    nodejs npm alsa-utils
 
 echo "Adding kiosk user ..."
-adduser --quiet --disabled-password --shell /bin/bash --home /home/kiosk --gecos "User" kiosk
+adduser --quiet --disabled-password --shell /bin/bash \
+        --home /home/kiosk --gecos "User" kiosk
 
 echo "Changing kiosk user password ..."
 echo "kiosk:kiosk_password" | chpasswd
 
 echo "Adjusting /etc/hosts to know ws-server name ..."
 cp /etc/hosts /etc/hosts.bak
-sed -i 's/127.0.0.1\tlocalhost/127.0.0.1	localhost cast/' /etc/hosts
+sed -i 's/127.0.0.1\tlocalhost/127.0.0.1\tlocalhost cast/' /etc/hosts
 #echo "192.168.11.1  webrtc-cast" >> /etc/hosts
 
 echo "Ensure kiosk user has no sudo prompt ..."
 echo "kiosk ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/kiosk
-
-echo "Setting hostname to cast ..."
-echo cast > /etc/hostname
+chmod 0440 /etc/sudoers.d/kiosk
 
 echo "Setting up webrtc-cast repository ..."
-su - kiosk -c "
+runuser -l kiosk -c '
   if [ ! -d /home/kiosk/webrtc-cast ]; then
-    echo 'Cloning webrtc-cast repository...'
+    echo "Cloning webrtc-cast repository..."
     git clone https://github.com/unixabg/webrtc-cast.git /home/kiosk/webrtc-cast
   else
-    echo 'webrtc-cast repository already exists, pulling latest updates...'
+    echo "webrtc-cast repository already exists, pulling latest updates..."
     cd /home/kiosk/webrtc-cast
     git pull
   fi
-"
+'
 
 echo "Generating self-signed certificates ..."
-su - kiosk -c "
-  cd /home/kiosk/webrtc-cast
+runuser -l kiosk -c '
+  cd /home/kiosk/webrtc-cast || exit 1
   if [ ! -f cert.pem ] || [ ! -f key.pem ]; then
-    echo 'Creating self-signed certificates...'
-    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -passout pass: -subj '/C=US/ST=State/L=Locality/O=Organization/CN=localhost'
+    echo "Creating self-signed certificates..."
+    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+      -days 3650 -nodes -passout pass: \
+      -subj "/C=US/ST=State/L=Locality/O=Organization/CN=localhost"
   else
-    echo 'Certificates already exist, skipping generation...'
+    echo "Certificates already exist, skipping generation..."
   fi
-"
+'
 
 echo "Installing Node.js dependencies ..."
-su - kiosk -c "
-  cd /home/kiosk/webrtc-cast
+runuser -l kiosk -c '
+  cd /home/kiosk/webrtc-cast || exit 1
   npm install express
-"
+'
 
 echo "Setting up the wrapper launcher ..."
-cat > /usr/bin/kiosk << EOF
+cat > /usr/bin/kiosk << 'EOF'
 #!/bin/sh
 
 # Disable screen blanking and power saving features
@@ -80,14 +108,14 @@ rm -f /var/cache/lightdm/dmrc/kiosk.dmrc
 
 # Launch Chromium in kiosk mode
 chromium --disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies --autoplay-policy=no-user-gesture-required --ignore-certificate-errors --ignore-urlfetcher-cert-requests --ignore-websocket-cert-errors --kiosk https://localhost:8443/listening-chrome.html
-
 EOF
 
 echo "Make sure the kiosk script is 0755"
 chmod 0755 /usr/bin/kiosk
 
 echo "Setting up the .desktop for the display manager to kick off ..."
-cat > /usr/share/xsessions/kiosk.desktop << EOF
+mkdir -p /usr/share/xsessions
+cat > /usr/share/xsessions/kiosk.desktop << 'EOF'
 [Desktop Entry]
 Encoding=UTF-8
 Name=Kiosk
@@ -99,9 +127,20 @@ Type=Application
 EOF
 
 echo "Adjusting lightdm to kickoff the kiosk ..."
-cp /etc/lightdm/lightdm.conf /etc/lightdm/lightdm.conf.bak
-sed -i 's/#autologin-user=/autologin-user=kiosk/' /etc/lightdm/lightdm.conf
-sed -i 's/#autologin-session=/autologin-session=kiosk/' /etc/lightdm/lightdm.conf
+# Drop-in instead of sed'ing lightdm.conf: survives package upgrades and does not
+# depend on the shipped file still having those exact commented-out lines.
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/50-kiosk.conf << 'EOF'
+[Seat:*]
+autologin-user=kiosk
+autologin-session=kiosk
+autologin-user-timeout=0
+EOF
 
-echo "Settings for kiosk done. Type reboot to reboot the computer and test."
+# Make sure lightdm actually comes up on first boot (enable is a no-op in chroot
+# for the socket, but the symlink is what matters and it persists).
+systemctl enable lightdm 2>/dev/null || true
+systemctl set-default graphical.target 2>/dev/null || true
 
+echo "Settings for kiosk done. Reboot to start the kiosk."
+exit 0
