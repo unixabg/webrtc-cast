@@ -118,11 +118,14 @@ looks right, the TV is overscanning. Set the TV's picture size to
 ### Access Point (optional, Debian trixie)
 `contrib/ap-setup.sh` turns a Wi-Fi card on the cast station into an access
 point, so clients that know the passphrase can join it and browse to
-`https://cast:8443` (or `https://cast.home.arpa:8443`). Tested in dedicated
-mode (copper uplink, Qualcomm Atheros ath10k card as the AP); `--shared` mode
-is not tested on hardware yet.
+`https://cast:8443` (or `https://cast.home.arpa:8443`). Tested on a
+Qualcomm Atheros QCA6174 (ath10k): dedicated mode with a copper uplink and
+with no uplink, and `--shared` with a 5 GHz Wi-Fi uplink.
 
-* Check a card first (AP mode, and managed+AP at once with `--shared`):
+* Check a card first. It reports where the card can run an AP (bands and
+channels), whether it can be a station and an AP at once (on the same channel
+or on two), what that means for webrtc-cast, and the AP channel `--shared`
+would use right now:
 
 `sudo contrib/ap-setup.sh check --iface wlx00c0ca123456`
 
@@ -132,7 +135,11 @@ built-in card when the station is wired):
 `sudo contrib/ap-setup.sh install --iface wlx00c0ca123456 --ssid "Room 114 Cast" --passphrase 'secret-pass'`
 
 * One card shared with the station's Wi-Fi uplink (`--shared` creates a
-virtual `ap0`; the AP follows the uplink's channel when hostapd starts):
+virtual `ap0`). When hostapd starts, the AP takes the uplink's channel if the
+card allows an AP there; otherwise, on cards that can use two channels, it
+keeps its own 2.4 GHz channel and the radio time-slices between them. The
+station's Wi-Fi connection itself is configured separately (ifupdown with
+wpasupplicant):
 
 `sudo contrib/ap-setup.sh install --iface wlp2s0 --shared --ssid "Room 114 Cast" --passphrase 'secret-pass'`
 
@@ -141,8 +148,8 @@ also remove the hostapd and dnsmasq packages).
 
 By default AP clients can only reach the cast station: the station is their
 gateway (WebRTC needs a default route) but nothing is forwarded, and clients
-are isolated from each other. `--forward <uplink>` adds NAT so they also get
-the uplink's network. See `contrib/ap-setup.sh --help` for all options
+are isolated from each other. `--forward` adds NAT so they also get the
+network of whichever uplink is active (copper or Wi-Fi). See `contrib/ap-setup.sh --help` for all options
 (address/subnet, DHCP range, band, channel, country, DNS alias and domain).
 
 Cards: in-kernel Qualcomm Atheros (ath9k_htc, ath10k) and MediaTek (mt76,

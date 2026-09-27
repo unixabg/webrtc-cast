@@ -12,9 +12,11 @@
 #                        Most reliable; any channel/band the card allows.
 #   --shared             One card is both the station's uplink (managed mode)
 #                        and the AP, via a virtual interface (default ap0).
-#                        Needs driver support for managed+AP at once, and the
-#                        AP must use the same channel as the uplink; the
-#                        channel is synced from the uplink when hostapd starts.
+#                        Needs driver support for managed+AP at once. When
+#                        hostapd starts, the AP takes the uplink's channel if
+#                        the card allows an AP there; otherwise, on cards that
+#                        can use two channels, it keeps its own 2.4 GHz channel
+#                        (time-sliced). Run "check" to see what a card can do.
 #
 # Usage:
 #   ap-setup.sh install --ssid NAME --passphrase PASS [options]
@@ -64,9 +66,10 @@ install options:
   --address IP/PREFIX    AP address (default 192.168.11.1/24)
   --dhcp-range START,END DHCP pool (default .100-.200 of a /24)
   --band 2.4|5           Band (default 2.4)
-  --channel N            Channel (default 6 on 2.4 GHz, 36 on 5 GHz; in
-                         --shared mode this is only used until the uplink's
-                         channel is known)
+  --channel N            Channel (default 6 on 2.4 GHz, 36 on 5 GHz). In
+                         --shared mode the AP uses the uplink's channel when
+                         the card allows an AP there; otherwise, on cards
+                         that can use two channels, it stays on this one.
   --country CC           Regulatory country code (default US)
   --alias NAME           DNS name clients can use for the station (default
                          cast, so https://cast:8443); --alias '' disables
@@ -74,17 +77,20 @@ install options:
                          home.arpa, so cast.home.arpa also works)
   --no-isolate           Let AP clients reach each other (default: isolated,
                          clients can only talk to the station)
-  --forward UPLINK       Also route AP clients to the network on UPLINK with
-                         NAT (gives them internet/LAN access; off by default,
-                         casting does not need it). Clients always get the
+  --forward              Also route AP clients out through the station's
+                         uplink (copper or Wi-Fi, whichever is active) with
+                         NAT, giving them internet/LAN access. Off by default;
+                         casting does not need it. Clients always get the
                          station as gateway; without --forward it just
                          doesn't pass their traffic on.
   --strict               Stop if the card check finds a problem (default: warn)
   --no-start             Enable services but don't start them now
 
 check options:
-  --iface IF, --shared   As above; reports whether the card can do AP mode
-                         (and managed+AP at once with --shared)
+  --iface IF, --shared   As above; reports what the card can do: bands and
+                         channels for an AP, station + AP on one card (same
+                         channel or two), what that means for webrtc-cast,
+                         and the AP channel --shared would pick right now
 
 uninstall options:
   --purge                Also purge the hostapd and dnsmasq packages
@@ -222,9 +228,136 @@ combination_allows_shared() {
     '
 }
 
-# Soft check of the card. Returns 0 if nothing wrong was found, 1 otherwise.
+# Print "<freq> <channel> <status>" for each channel of a phy. status is ok
+# (an AP may start there), radar (DFS: needs a radar check first, not used),
+# noir (client only) or disabled. Reads `iw phy X channels`, falling back to
+# the frequency list in `iw phy X info` on older iw.
+phy_channel_list() {
+    local phy=$1 out
+    out=$(iw phy "$phy" channels 2>/dev/null || true)
+    [ -n "$out" ] || out=$(iw phy "$phy" info 2>/dev/null || true)
+    printf '%s\n' "$out" | parse_channel_list
+}
+
+parse_channel_list() {
+    awk '
+        function rank(s) { return s == "disabled" ? 3 : s == "noir" ? 2 : s == "radar" ? 1 : 0 }
+        function mark(s) { if (rank(s) > rank(st)) st = s }
+        function flags(l) {
+            l = tolower(l)
+            if (l ~ /disabled/) mark("disabled")
+            if (l ~ /no ir/) mark("noir")
+            if (l ~ /radar/) mark("radar")
+        }
+        function flush() { if (ch != "") print f, ch, st; ch = "" }
+        /\* [0-9.]+ MHz \[[0-9]+\]/ {
+            flush()
+            match($0, /[0-9.]+ MHz/); f = substr($0, RSTART, RLENGTH); sub(/ MHz/, "", f); sub(/\..*/, "", f)
+            match($0, /\[[0-9]+\]/); ch = substr($0, RSTART + 1, RLENGTH - 2)
+            st = "ok"; rest = $0; sub(/.*\]/, "", rest); flags(rest)
+            next
+        }
+        ch != "" && /^[[:space:]]+(No IR|Radar detection|Disabled)/ { flags($0); next }
+        END { flush() }
+    '
+}
+
+band_of_freq() {
+    if [ "$1" -lt 3000 ]; then echo 2.4
+    elif [ "$1" -lt 5925 ]; then echo 5
+    else echo 6
+    fi
+}
+
+# "1 2 3 4 11" -> "1-4, 11" (use step 4 for 5/6 GHz channel numbers)
+compress_channels() {
+    awk -v step="$1" '
+        function add() { out = out (out == "" ? "" : ", ") (s == p ? s : s "-" p) }
+        { for (i = 1; i <= NF; i++) { c = $i + 0
+              if (!n) { s = c; p = c; n = 1; continue }
+              if (c == p + step) { p = c; continue }
+              add(); s = c; p = c } }
+        END { if (n) add(); print out }
+    '
+}
+
+# From a channel list, print for one band: "<ok channels as ranges>|<ok>|<noir>|<radar>|<total>"
+band_summary() {
+    local chanlist=$1 band=$2 step=1 ok
+    [ "$band" = 2.4 ] || step=4
+    ok=$(printf '%s\n' "$chanlist" | while read -r f c s; do
+            [ -n "$f" ] && [ "$(band_of_freq "$f")" = "$band" ] && [ "$s" = ok ] && echo "$c"
+         done | sort -n | tr '\n' ' ' | compress_channels "$step")
+    printf '%s\n' "$chanlist" | awk -v b="$band" -v ok="$ok" '
+        { band = ($1 < 3000) ? "2.4" : ($1 < 5925) ? "5" : "6" }
+        band == b { t++; if ($3 == "ok") o++; else if ($3 == "noir") n++; else if ($3 == "radar") r++ }
+        END { printf "%s|%d|%d|%d|%d\n", ok, o, n, r, t }
+    '
+}
+
+channel_status() {
+    printf '%s\n' "$1" | awk -v c="$2" '$2 == c { print $3; found = 1; exit } END { if (!found) print "unknown" }'
+}
+
+# Highest #channels over all combinations that allow a managed and an AP
+# interface at the same time; 0 if none does.
+best_shared_channels() {
+    local info=$1 line result best=0 n
+    while IFS= read -r line; do
+        result=$(printf '%s\n' "$line" | combination_allows_shared)
+        if [ -n "$result" ]; then
+            n=${result#yes }
+            [ "$n" -gt "$best" ] && best=$n
+        fi
+    done < <(printf '%s\n' "$info" | phy_combinations)
+    echo "$best"
+}
+
+# Print "<system country> <card's own country or empty>".
+reg_countries() {
+    local reg global own
+    reg=$(iw reg get 2>/dev/null || true)
+    global=$(printf '%s\n' "$reg" | awk '/^global/ { g = 1; next } g && /^country/ { sub(/:.*/, "", $2); print $2; exit }')
+    own=$(printf '%s\n' "$reg" | awk -v p="phy#${1#phy}" '
+        index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == " ") { f = 1; next }
+        f && /^country/ { sub(/:.*/, "", $2); print $2; exit }
+        f && /^(phy#|global)/ { exit }')
+    echo "${global:-?} $own"
+}
+
+# Decide the AP channel in --shared mode. Prints "<channel> <hw_mode> same|separate",
+# or "none <status of the uplink channel>" when no channel works.
+#   - the uplink's channel if an AP may start there (one channel, no time-slicing)
+#   - otherwise the configured channel, if the card can use a second channel
+decide_ap_channel() {
+    local chanlist=$1 channels=$2 ufreq=${3%.*} cch=$4 cmode=$5 uch st
+    uch=$(freq_to_channel "$ufreq" 2>/dev/null || true)
+    st=unknown
+    [ -z "$uch" ] || st=$(channel_status "$chanlist" "$uch")
+    if [ -n "$uch" ] && [ "$ufreq" -lt 5925 ] && [ "$st" = ok ]; then
+        if [ "$ufreq" -lt 3000 ]; then echo "$uch g same"; else echo "$uch a same"; fi
+    elif [ "${channels:-0}" -ge 2 ]; then
+        echo "$cch $cmode separate"
+    else
+        echo "none $st"
+    fi
+}
+
+describe_status() {
+    case "$1" in
+        noir) echo "client-only for this card (no-IR)" ;;
+        radar) echo "a DFS/radar channel" ;;
+        disabled) echo "disabled for this card" ;;
+        *) echo "not usable for an AP" ;;
+    esac
+}
+
+# Report what the card can do, in plain language. Returns 0 if nothing wrong
+# was found for the requested mode, 1 otherwise. $3/$4: configured AP channel.
 check_card() {
-    local iface=$1 shared=$2 problems=0 phy info driver line result channels=""
+    local iface=$1 shared=$2 cch=${3:-6} cmode=${4:-g}
+    local problems=0 phy info driver chip slot ap_mode channels chanlist sysc own
+    local s6 ok24 ok5 n5 r5 t5 ranges24 ranges5 link ufreq ussid dch dmode dhow
 
     if ! command -v iw >/dev/null 2>&1; then
         warn "iw is not installed; can't check the card (apt install iw)"
@@ -246,47 +379,140 @@ check_card() {
     fi
 
     driver=$(basename "$(readlink -f "/sys/class/net/$iface/device/driver" 2>/dev/null)" 2>/dev/null || true)
-    log "card: $iface ($phy), driver: ${driver:-unknown}"
-
-    if printf '%s\n' "$info" | phy_modes | grep -qx 'AP'; then
-        log "  AP mode: supported"
-    else
-        warn "  AP mode: NOT listed for $iface; hostapd will not be able to run on this card"
-        problems=1
+    slot=$(basename "$(readlink -f "/sys/class/net/$iface/device" 2>/dev/null)" 2>/dev/null || true)
+    chip=""
+    if command -v lspci >/dev/null 2>&1 && [ -n "$slot" ]; then
+        chip=$(lspci -s "$slot" 2>/dev/null | sed 's/^[^:]*: *//; s/^[^:]*: *//' | head -n 1)
     fi
 
-    if [ "$shared" = 1 ]; then
-        while IFS= read -r line; do
-            result=$(printf '%s\n' "$line" | combination_allows_shared)
-            if [ -n "$result" ]; then
-                channels=${result#yes }
-                break
-            fi
-        done < <(printf '%s\n' "$info" | phy_combinations)
-        if [ -n "$channels" ]; then
-            log "  managed + AP at the same time: supported (#channels <= $channels)"
-            if [ "$channels" -le 1 ]; then
-                log "  the AP must use the uplink's channel; it is synced when hostapd starts,"
-                log "  but if the uplink roams to another channel, restart hostapd"
-            fi
+    ap_mode=no
+    printf '%s\n' "$info" | phy_modes | grep -qx 'AP' && ap_mode=yes
+    channels=$(best_shared_channels "$info")
+    chanlist=$(phy_channel_list "$phy")
+    read -r sysc own <<<"$(reg_countries "$phy")"
+
+    IFS='|' read -r ranges24 ok24 _ _ _ <<<"$(band_summary "$chanlist" 2.4)"
+    IFS='|' read -r ranges5 ok5 n5 r5 t5 <<<"$(band_summary "$chanlist" 5)"
+    s6=$(band_summary "$chanlist" 6)
+
+    echo "Wi-Fi card: $iface ($phy), driver ${driver:-unknown}"
+    [ -z "$chip" ] || echo "Chip:       $chip"
+    if [ -n "$own" ]; then
+        echo "Regulatory: the card uses its own setting (country $own), not the system's ($sysc)"
+        case "$own" in
+            00|99) echo "            (world-roaming: the card is cautious and may refuse an AP on 5 GHz)" ;;
+        esac
+    else
+        echo "Regulatory: follows the system setting (country $sysc)"
+    fi
+    echo
+
+    if [ "$ap_mode" = no ]; then
+        echo "Access point mode: NOT supported; hostapd can't run on this card."
+        problems=1
+    else
+        echo "Where this card can run an access point (as advertised):"
+        if [ "${ok24:-0}" -gt 0 ]; then
+            printf '  %-8s yes   channels %s\n' "2.4 GHz" "$ranges24"
         else
-            warn "  managed + AP at the same time: NOT supported by this driver;"
-            warn "  --shared will not work, use a second card for the AP"
-            problems=1
+            printf '  %-8s no\n' "2.4 GHz"
         fi
+        if [ "${t5:-0}" -gt 0 ]; then
+            if [ "${ok5:-0}" -gt 0 ]; then
+                printf '  %-8s yes   channels %s' "5 GHz" "$ranges5"
+                [ "${r5:-0}" -eq 0 ] || printf ' (%s DFS channels not used)' "$r5"
+                echo
+            elif [ "${n5:-0}" -gt 0 ]; then
+                printf '  %-8s no    client only (the card marks 5 GHz "no-IR")\n' "5 GHz"
+            else
+                printf '  %-8s no\n' "5 GHz"
+            fi
+        fi
+        s6=${s6#*|}; s6=${s6%%|*}
+        [ "${s6:-0}" -eq 0 ] || printf '  %-8s not used by this script\n' "6 GHz"
+    fi
+    echo
+
+    echo "Station + AP on this one card:"
+    if [ "$channels" -eq 0 ]; then
+        echo "  not supported"
+    elif [ "$channels" -eq 1 ]; then
+        echo "  same channel only (the AP must share the uplink's channel)"
+    else
+        echo "  yes, up to $channels channels (the radio time-slices between them)"
+    fi
+    echo
+
+    local verdict_24 verdict_5 verdict_ded verdict_ap5
+    if [ "$ap_mode" = no ]; then
+        verdict_ded="not possible with this card"
+        verdict_24="not possible: use a second card for the AP"
+        verdict_5="not possible: use a second card for the AP"
+        verdict_ap5="not possible with this card"
+    else
+        if [ "${ok24:-0}" -gt 0 ] && [ "${ok5:-0}" -gt 0 ]; then
+            verdict_ded="works: AP on 2.4 GHz (or 5 GHz with --band 5)"
+        elif [ "${ok24:-0}" -gt 0 ]; then
+            verdict_ded="works: AP on 2.4 GHz"
+        elif [ "${ok5:-0}" -gt 0 ]; then
+            verdict_ded="works: AP on 5 GHz (--band 5)"
+        else
+            verdict_ded="not possible: no channel allows an AP"
+        fi
+        if [ "$channels" -ge 1 ] && [ "${ok24:-0}" -gt 0 ]; then
+            verdict_24="works: AP shares the uplink channel"
+        else
+            verdict_24="not possible: use a second card for the AP"
+        fi
+        if [ "$channels" -ge 1 ] && [ "${ok5:-0}" -gt 0 ]; then
+            verdict_5="works: AP shares the uplink channel (if it isn't a DFS channel)"
+            [ "$channels" -lt 2 ] || [ "${ok24:-0}" -eq 0 ] || verdict_5="$verdict_5, else 2.4 GHz time-sliced"
+        elif [ "$channels" -ge 2 ] && [ "${ok24:-0}" -gt 0 ]; then
+            verdict_5="works: AP stays on 2.4 GHz, time-sliced (slower)"
+        else
+            verdict_5="not possible: use a second card for the AP"
+        fi
+        if [ "${ok5:-0}" -gt 0 ]; then verdict_ap5="works (--band 5)"; else verdict_ap5="not possible with this card"; fi
+    fi
+    echo "What that means for webrtc-cast:"
+    printf '  %-36s %s\n' "AP only (wired or no uplink)" "$verdict_ded"
+    printf '  %-36s %s\n' "Wi-Fi uplink on 2.4 GHz + AP" "$verdict_24"
+    printf '  %-36s %s\n' "Wi-Fi uplink on 5 GHz + AP" "$verdict_5"
+    printf '  %-36s %s\n' "AP on 5 GHz" "$verdict_ap5"
+    echo
+
+    link=$(iw dev "$iface" link 2>/dev/null || true)
+    ufreq=$(printf '%s\n' "$link" | awk '/freq:/ { print $2; exit }')
+    ussid=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*SSID: //p' | head -n 1)
+    if [ -n "$ufreq" ]; then
+        local uch
+        uch=$(freq_to_channel "${ufreq%.*}" 2>/dev/null || echo "?")
+        printf 'Currently:  %s is connected to "%s" on %s GHz channel %s\n' "$iface" "$ussid" "$(band_of_freq "${ufreq%.*}")" "$uch"
+        read -r dch dmode dhow <<<"$(decide_ap_channel "$chanlist" "$channels" "$ufreq" "$cch" "$cmode")"
+        if [ "$dch" = none ]; then
+            echo "            with --shared the AP could not start: channel $uch is $(describe_status "$dmode")"
+            echo "            and the card can't run the AP on a second channel"
+            [ "$shared" = 0 ] || problems=1
+        elif [ "$dhow" = same ]; then
+            echo "            with --shared the AP would use channel $dch (shared with the uplink)"
+        else
+            echo "            with --shared the AP would use channel $dch on its own (time-sliced)"
+        fi
+        echo
     fi
 
     case "$driver" in
         iwlwifi)
-            warn "  Intel (iwlwifi): AP mode is usually limited to 2.4 GHz; 5 GHz AP is"
-            warn "  often refused. Use --band 2.4 or a MediaTek/Atheros card for the AP." ;;
+            echo "Driver note: Intel cards usually allow an AP on 2.4 GHz only." ;;
         mt76*|mt7*|ath9k*|ath10k*|ath11k*|ath12k*|brcmfmac)
-            log "  driver has a good track record for AP mode" ;;
+            echo "Driver note: $driver has a good track record for AP mode." ;;
         8188eu|8192eu|8812au|8814au|8821au|8821cu|88x2bu|88XXau|rtl88xxau|rtl8812au|rtl88x2bu|rtl8821cu)
-            warn "  $driver is an out-of-tree Realtek driver; AP mode is often unreliable"
-            warn "  and it can break on kernel updates" ;;
+            echo "Driver note: $driver is an out-of-tree Realtek driver; AP mode is often"
+            echo "             unreliable and it can break on kernel updates." ;;
     esac
+    echo "This is what the driver advertises; test anything marked time-sliced before relying on it."
 
+    [ "$shared" = 0 ] || [ "$channels" -ge 1 ] || problems=1
     return $problems
 }
 
@@ -346,36 +572,51 @@ cmd_route_up() {
     exit 0
 }
 
-# --shared: set hostapd's channel/band to the uplink's before hostapd starts.
+set_hostapd_channel() {
+    sed -i -e "s/^channel=.*/channel=$1/" -e "s/^hw_mode=.*/hw_mode=$2/" /etc/hostapd/hostapd.conf
+}
+
+# --shared: pick the AP channel before hostapd starts (see decide_ap_channel).
+# Exits non-zero when no channel works, so hostapd isn't started on a channel
+# the card refuses; systemd retries, which picks it up if the uplink moves.
 cmd_sync_channel() {
     load_config
     [ "$MODE" = shared ] || exit 0
-    local freq="" ch mode
+    local freq="" phy chanlist ch mode how uch
+    local cch=${AP_CHANNEL:-6} cmode=${AP_HWMODE:-g}
     for _ in $(seq 1 30); do
         freq=$(iw dev "$IFACE" link 2>/dev/null | awk '/freq:/ { print $2; exit }')
         [ -n "$freq" ] && break
         sleep 1
     done
     if [ -z "$freq" ]; then
-        warn "$IFACE is not connected after 30s; starting the AP on the configured channel"
+        warn "$IFACE is not connected after 30s; starting the AP on channel $cch"
+        set_hostapd_channel "$cch" "$cmode"
         exit 0
     fi
-    ch=$(freq_to_channel "$freq") || { warn "unknown uplink frequency $freq; leaving channel as is"; exit 0; }
-    if [ "${freq%.*}" -ge 5000 ]; then
-        mode=a
-        warn "uplink is on 5 GHz channel $ch; many cards refuse to start an AP there"
-    else
-        mode=g
+    phy=$(cat "/sys/class/net/$IFACE/phy80211/name")
+    chanlist=$(phy_channel_list "$phy")
+    uch=$(freq_to_channel "${freq%.*}" 2>/dev/null || echo "?")
+    read -r ch mode how <<<"$(decide_ap_channel "$chanlist" "${CHANNELS:-1}" "$freq" "$cch" "$cmode")"
+    if [ "$ch" = none ]; then
+        warn "the uplink is on channel $uch, which is $(describe_status "$mode"),"
+        warn "and the card can't run the AP on a second channel. Connect the uplink on"
+        warn "2.4 GHz, or use a second card for the AP."
+        exit 1
     fi
-    sed -i -e "s/^channel=.*/channel=$ch/" -e "s/^hw_mode=.*/hw_mode=$mode/" /etc/hostapd/hostapd.conf
-    log "AP channel synced to uplink: channel $ch (hw_mode=$mode)"
+    set_hostapd_channel "$ch" "$mode"
+    if [ "$how" = same ]; then
+        log "AP on channel $ch, shared with the uplink"
+    else
+        log "uplink on channel $uch; AP on its own channel $ch (time-sliced)"
+    fi
 }
 
 # ---------------------------------------------------------------- install
 
 cmd_install() {
     local ssid="" pass="" iface="" shared=0 address="192.168.11.1/24" range=""
-    local band="2.4" channel="" country="US" alias="cast" domain="home.arpa" isolate=1 uplink=""
+    local band="2.4" channel="" country="US" alias="cast" domain="home.arpa" isolate=1 forward=0
     local strict=0 nostart=0
     AP_IFACE=ap0
 
@@ -394,7 +635,13 @@ cmd_install() {
             --alias) alias=${2-}; shift 2 ;;
             --domain) domain=${2-}; shift 2 ;;
             --no-isolate) isolate=0; shift ;;
-            --forward) uplink=${2-}; shift 2 ;;
+            --forward)
+                forward=1; shift
+                # older form: --forward UPLINK (the uplink name is no longer needed)
+                if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+                    warn "--forward no longer takes an interface name; ignoring '$1'"
+                    shift
+                fi ;;
             --strict) strict=1; shift ;;
             --no-start) nostart=1; shift ;;
             -h|--help) usage; exit 0 ;;
@@ -448,7 +695,6 @@ cmd_install() {
     [ -z "$alias" ] || [[ "$alias" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || die "--alias must be a simple host name"
     [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]] || die "--domain must be a domain name like home.arpa"
     valid_ifname "$AP_IFACE" || die "--ap-iface is not a valid interface name"
-    [ -z "$uplink" ] || valid_ifname "$uplink" || die "--forward needs a valid uplink interface name"
 
     if [ -z "$iface" ]; then
         iface=$(first_wireless_iface) || die "no Wi-Fi card found; pass --iface (see: ip link)"
@@ -456,11 +702,15 @@ cmd_install() {
     fi
     valid_ifname "$iface" || die "--iface is not a valid interface name"
     [ "$shared" = 1 ] || AP_IFACE=$iface
-    [ -z "$uplink" ] || [ "$uplink" != "$AP_IFACE" ] || die "--forward uplink can't be the AP interface"
 
-    # --- soft card check
+    # --- card report / soft check
+    local channels=1
     if [ -z "$ROOT" ]; then
-        if ! check_card "$iface" "$shared"; then
+        local phy_info
+        phy_info=$(iw phy "$(cat "/sys/class/net/$iface/phy80211/name" 2>/dev/null)" info 2>/dev/null || true)
+        [ -z "$phy_info" ] || channels=$(best_shared_channels "$phy_info")
+        [ "$channels" -ge 1 ] || channels=1
+        if ! check_card "$iface" "$shared" "$channel" "$hw_mode"; then
             [ "$strict" = 1 ] && die "card check failed (--strict)"
             warn "card check found problems; continuing anyway (use --strict to stop)"
         fi
@@ -478,7 +728,7 @@ cmd_install() {
         log "installing packages ..."
         export DEBIAN_FRONTEND=noninteractive
         local pkgs="hostapd dnsmasq iw"
-        [ -z "$uplink" ] || pkgs="$pkgs nftables"
+        [ "$forward" = 0 ] || pkgs="$pkgs nftables"
         # shellcheck disable=SC2086
         apt-get install -y $pkgs
     fi
@@ -494,8 +744,12 @@ MODE=$([ "$shared" = 1 ] && echo shared || echo dedicated)
 IFACE=$iface
 AP_IFACE=$AP_IFACE
 AP_ADDRESS=$ap_ip/$prefix
-FORWARD=$([ -n "$uplink" ] && echo 1 || echo 0)
-UPLINK=$uplink
+FORWARD=$forward
+# --shared: most channels the card can use at once (1 = AP must share the
+# uplink's channel), and the AP's own channel when it can't share it.
+CHANNELS=$channels
+AP_CHANNEL=$channel
+AP_HWMODE=$hw_mode
 EOF
 
     if [ -f "$HOSTAPD_CONF" ] && [ ! -f "$HOSTAPD_CONF.webrtc-cast-ap.bak" ] &&
@@ -540,7 +794,7 @@ EOF
         echo "# Chrome only offers WebRTC addresses on the default-route interface,"
         echo "# so without a gateway casting times out."
         echo "dhcp-option=option:router,$ap_ip"
-        if [ -z "$uplink" ]; then
+        if [ "$forward" = 0 ]; then
             echo "# No forwarding: nothing upstream to ask, answer local names only."
             echo "no-resolv"
         fi
@@ -589,7 +843,7 @@ EOF
         [ "$shared" = 0 ] || echo "ExecStartPre=$SELF_INSTALL sync-channel"
         echo "ExecStartPost=$SELF_INSTALL route-up"
         echo "Restart=on-failure"
-        echo "RestartSec=5"
+        echo "RestartSec=15"
     } > "$HOSTAPD_DROPIN"
 
     cat > "$DNSMASQ_DROPIN" <<EOF
@@ -599,19 +853,20 @@ Wants=webrtc-cast-ap.service
 After=webrtc-cast-ap.service
 EOF
 
-    if [ -n "$uplink" ]; then
+    if [ "$forward" = 1 ]; then
         mkdir -p "$(dirname "$SYSCTL_CONF")" "$(dirname "$NFT_CONF")"
         echo "net.ipv4.ip_forward=1" > "$SYSCTL_CONF"
         cat > "$NFT_CONF" <<EOF
 #!/usr/sbin/nft -f
-# Written by contrib/ap-setup.sh: NAT AP clients out through $uplink.
+# Written by contrib/ap-setup.sh: NAT AP clients out through whichever
+# uplink is active (every interface except the AP), copper or Wi-Fi.
 # Own table, so the system's other nftables rules are left alone.
 table ip webrtc_cast_ap
 delete table ip webrtc_cast_ap
 table ip webrtc_cast_ap {
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
-        ip saddr $network oifname "$uplink" masquerade
+        ip saddr $network oifname != "$AP_IFACE" masquerade
     }
 }
 EOF
@@ -637,7 +892,7 @@ EOF
         systemctl unmask hostapd
         systemctl enable webrtc-cast-ap.service hostapd.service dnsmasq.service
         if systemd_running && [ "$nostart" = 0 ]; then
-            [ -z "$uplink" ] || sysctl -q -p "$SYSCTL_CONF"
+            [ "$forward" = 0 ] || sysctl -q -p "$SYSCTL_CONF"
             log "starting the access point ..."
             systemctl restart webrtc-cast-ap.service
             systemctl restart hostapd.service dnsmasq.service ||
@@ -721,7 +976,7 @@ cmd_check() {
     if check_card "$iface" "$shared"; then
         log "check passed"
     else
-        log "check found problems (see warnings above)"
+        log "check found problems (see above)"
         exit 1
     fi
 }
