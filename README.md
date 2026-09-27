@@ -118,7 +118,9 @@ looks right, the TV is overscanning. Set the TV's picture size to
 ### Access Point (optional, Debian trixie)
 `contrib/ap-setup.sh` turns a Wi-Fi card on the cast station into an access
 point, so clients that know the passphrase can join it and browse to
-`https://cast:8443`. It has not been tested on hardware yet.
+`https://cast:8443` (or `https://cast.home.arpa:8443`). Tested in dedicated
+mode (copper uplink, Qualcomm Atheros ath10k card as the AP); `--shared` mode
+is not tested on hardware yet.
 
 * Check a card first (AP mode, and managed+AP at once with `--shared`):
 
@@ -137,13 +139,14 @@ virtual `ap0`; the AP follows the uplink's channel when hostapd starts):
 * Remove it again: `sudo contrib/ap-setup.sh uninstall` (add `--purge` to
 also remove the hostapd and dnsmasq packages).
 
-By default AP clients can only reach the cast station (no gateway, clients
-isolated from each other). `--forward <uplink>` adds NAT so they also get
+By default AP clients can only reach the cast station: the station is their
+gateway (WebRTC needs a default route) but nothing is forwarded, and clients
+are isolated from each other. `--forward <uplink>` adds NAT so they also get
 the uplink's network. See `contrib/ap-setup.sh --help` for all options
-(address/subnet, DHCP range, band, channel, country, DNS alias).
+(address/subnet, DHCP range, band, channel, country, DNS alias and domain).
 
-Cards: in-kernel MediaTek (mt76, e.g. MT7612U, MT7921AU) and Atheros
-(ath9k_htc, AR9271) work well in AP mode. Intel cards usually only do AP on
+Cards: in-kernel Qualcomm Atheros (ath9k_htc, ath10k) and MediaTek (mt76,
+e.g. MT7612U, MT7921AU) work well in AP mode. Intel cards usually only do AP on
 2.4 GHz. Avoid Realtek USB cards that need out-of-tree drivers.
 
 ### Old Notes

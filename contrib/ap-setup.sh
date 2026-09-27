@@ -70,11 +70,15 @@ install options:
   --country CC           Regulatory country code (default US)
   --alias NAME           DNS name clients can use for the station (default
                          cast, so https://cast:8443); --alias '' disables
+  --domain DOMAIN        Local DNS domain and DHCP search domain (default
+                         home.arpa, so cast.home.arpa also works)
   --no-isolate           Let AP clients reach each other (default: isolated,
                          clients can only talk to the station)
   --forward UPLINK       Also route AP clients to the network on UPLINK with
                          NAT (gives them internet/LAN access; off by default,
-                         casting does not need it)
+                         casting does not need it). Clients always get the
+                         station as gateway; without --forward it just
+                         doesn't pass their traffic on.
   --strict               Stop if the card check finds a problem (default: warn)
   --no-start             Enable services but don't start them now
 
@@ -313,6 +317,7 @@ cmd_iface_up() {
 
 cmd_iface_down() {
     load_config
+    ip route del default dev "$AP_IFACE" metric 9999 2>/dev/null || true
     if [ "$FORWARD" = 1 ]; then
         nft delete table ip webrtc_cast_ap 2>/dev/null || true
     fi
@@ -321,6 +326,24 @@ cmd_iface_down() {
     else
         ip addr flush dev "$AP_IFACE" 2>/dev/null || true
     fi
+}
+
+# Last-resort default route via the AP, added after hostapd has brought the
+# interface up (the kernel refuses routes through a down interface, and drops
+# them when it goes down). Chrome only offers WebRTC addresses on the
+# default-route interface, so a station with no uplink at all would offer
+# nothing. The huge metric means any real uplink route always wins. Never
+# fails: it runs as hostapd's ExecStartPost and must not stop the AP.
+cmd_route_up() {
+    load_config
+    for _ in $(seq 1 10); do
+        if ip route replace default dev "$AP_IFACE" metric 9999 2>/dev/null; then
+            exit 0
+        fi
+        sleep 1
+    done
+    warn "could not add the fallback default route via $AP_IFACE (the AP still works)"
+    exit 0
 }
 
 # --shared: set hostapd's channel/band to the uplink's before hostapd starts.
@@ -352,7 +375,7 @@ cmd_sync_channel() {
 
 cmd_install() {
     local ssid="" pass="" iface="" shared=0 address="192.168.11.1/24" range=""
-    local band="2.4" channel="" country="US" alias="cast" isolate=1 uplink=""
+    local band="2.4" channel="" country="US" alias="cast" domain="home.arpa" isolate=1 uplink=""
     local strict=0 nostart=0
     AP_IFACE=ap0
 
@@ -369,6 +392,7 @@ cmd_install() {
             --channel) channel=${2-}; shift 2 ;;
             --country) country=${2-}; shift 2 ;;
             --alias) alias=${2-}; shift 2 ;;
+            --domain) domain=${2-}; shift 2 ;;
             --no-isolate) isolate=0; shift ;;
             --forward) uplink=${2-}; shift 2 ;;
             --strict) strict=1; shift ;;
@@ -422,6 +446,7 @@ cmd_install() {
     esac
     [[ "$country" =~ ^[A-Z]{2}$ ]] || die "--country must be a two-letter code like US"
     [ -z "$alias" ] || [[ "$alias" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || die "--alias must be a simple host name"
+    [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]] || die "--domain must be a domain name like home.arpa"
     valid_ifname "$AP_IFACE" || die "--ap-iface is not a valid interface name"
     [ -z "$uplink" ] || valid_ifname "$uplink" || die "--forward needs a valid uplink interface name"
 
@@ -507,16 +532,28 @@ EOF
         echo "# Serve only the AP (not lo) so nothing else on port 53 is disturbed."
         echo "except-interface=lo"
         echo "bind-dynamic"
+        echo "# Don't hand out /etc/hosts (it maps cast to 127.0.0.1 for the kiosk)."
+        echo "no-hosts"
         echo "dhcp-range=$range_start,$range_end,$(prefix_to_netmask "$prefix"),12h"
         echo "dhcp-option=option:dns-server,$ap_ip"
-        if [ -n "$uplink" ]; then
-            echo "dhcp-option=option:router,$ap_ip"
-        else
-            echo "# No default gateway: clients only reach the cast station."
-            echo "dhcp-option=option:router"
+        echo "# The station is the clients' default gateway even without forwarding:"
+        echo "# Chrome only offers WebRTC addresses on the default-route interface,"
+        echo "# so without a gateway casting times out."
+        echo "dhcp-option=option:router,$ap_ip"
+        if [ -z "$uplink" ]; then
+            echo "# No forwarding: nothing upstream to ask, answer local names only."
             echo "no-resolv"
         fi
-        [ -z "$alias" ] || echo "address=/$alias/$ap_ip"
+        echo "# Local domain and search list, so a bare name like cast resolves on"
+        echo "# clients that won't send single-label names to DNS (systemd-resolved)."
+        echo "domain=$domain"
+        echo "dhcp-option=option:domain-search,$domain"
+        echo "local=/$domain/"
+        if [ -n "$alias" ]; then
+            echo "local=/$alias/"
+            echo "address=/$alias/$ap_ip"
+            echo "address=/$alias.$domain/$ap_ip"
+        fi
     } > "$DNSMASQ_CONF"
 
     cat > "$AP_UNIT" <<EOF
@@ -550,6 +587,7 @@ EOF
         echo
         echo "[Service]"
         [ "$shared" = 0 ] || echo "ExecStartPre=$SELF_INSTALL sync-channel"
+        echo "ExecStartPost=$SELF_INSTALL route-up"
         echo "Restart=on-failure"
         echo "RestartSec=5"
     } > "$HOSTAPD_DROPIN"
@@ -611,7 +649,7 @@ EOF
 
     log "done: SSID \"$ssid\" on $AP_IFACE ($ap_ip/$prefix), DHCP $range_start-$range_end"
     if [ -n "$alias" ]; then
-        log "clients join the AP and browse to https://$alias:8443"
+        log "clients join the AP and browse to https://$alias:8443 (or https://$alias.$domain:8443)"
     else
         log "clients join the AP and browse to https://$ap_ip:8443"
     fi
@@ -697,6 +735,7 @@ case "${1-}" in
     iface-up)     cmd_iface_up ;;
     iface-down)   cmd_iface_down ;;
     sync-channel) cmd_sync_channel ;;
+    route-up)     cmd_route_up ;;
     -h|--help|"") usage ;;
     *)            die "unknown command: $1 (see --help)" ;;
 esac
