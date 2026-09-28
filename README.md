@@ -127,9 +127,9 @@ looks right, the TV is overscanning. Set the TV's picture size to
 ### Access Point (optional, Debian trixie)
 `contrib/ap-setup.sh` turns a Wi-Fi card on the cast station into an access
 point, so clients that know the passphrase can join it and browse to
-`https://cast:8443` (or `https://cast.home.arpa:8443`). Tested on a
-Qualcomm Atheros QCA6174 (ath10k): dedicated mode with a copper uplink and
-with no uplink, and `--shared` with a 5 GHz Wi-Fi uplink.
+`https://cast:8443` (or `https://cast.home.arpa:8443`). Results for the
+cards tested so far are in `contrib/wifi-cards.md`; in short, a dedicated
+card for the AP is the most reliable setup.
 
 * Check a card first. It reports where the card can run an AP (bands and
 channels), whether it can be a station and an AP at once (on the same channel
@@ -146,9 +146,11 @@ built-in card when the station is wired):
 * One card shared with the station's Wi-Fi uplink (`--shared` creates a
 virtual `ap0`). When hostapd starts, the AP takes the uplink's channel if the
 card allows an AP there; otherwise, on cards that can use two channels, it
-keeps its own 2.4 GHz channel and the radio time-slices between them. The
-station's Wi-Fi connection itself is configured separately (ifupdown with
-wpasupplicant):
+keeps its own 2.4 GHz channel and the radio time-slices between them (which
+drops AP clients on some cards). A timer restarts hostapd when the station
+moves to another channel, so the AP follows it. The station's Wi-Fi
+connection is set on the setup page, which keeps it on channels the AP can
+share, or by hand (ifupdown with wpasupplicant):
 
 `sudo contrib/ap-setup.sh install --iface wlp2s0 --shared --ssid "Room 114 Cast" --passphrase 'secret-pass'`
 
@@ -158,12 +160,17 @@ also remove the hostapd and dnsmasq packages).
 By default AP clients can only reach the cast station: the station is their
 gateway (WebRTC needs a default route) but nothing is forwarded, and clients
 are isolated from each other. `--forward` adds NAT so they also get the
-network of whichever uplink is active (copper or Wi-Fi). See `contrib/ap-setup.sh --help` for all options
-(address/subnet, DHCP range, band, channel, country, DNS alias and domain).
+network of whichever uplink is active (copper or Wi-Fi). See
+`contrib/ap-setup.sh --help` for all options (address/subnet, DHCP range,
+band, channel, country, DNS alias and domain). Running `install` again
+replaces the previous setup, including switching between dedicated and
+shared mode.
 
-Cards: in-kernel Qualcomm Atheros (ath9k_htc, ath10k) and MediaTek (mt76,
-e.g. MT7612U, MT7921AU) work well in AP mode. Intel cards usually only do AP on
-2.4 GHz. Avoid Realtek USB cards that need out-of-tree drivers.
+Cards: prefer in-kernel drivers. MediaTek (mt76, e.g. MT7612U, MT7921AU) and
+Qualcomm Atheros (ath9k_htc, ath10k) are good candidates for a dedicated AP;
+Intel cards usually only do AP on 2.4 GHz; avoid Realtek USB cards that need
+out-of-tree drivers. Tested results, and how to add a card:
+`contrib/wifi-cards.md`.
 
 ### Old Notes
 * Clone the project.

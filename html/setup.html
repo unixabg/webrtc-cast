@@ -64,6 +64,9 @@
         .scan-results button:hover {
             background: #e4eefc;
         }
+        .scan-results button.not-shareable {
+            color: #888;
+        }
         .hint {
             color: #666;
             font-size: 0.9em;
@@ -271,6 +274,7 @@
 
         // ---- Station WiFi and Access Point panels ----
         let stationShared = false;
+        let lastScan = null;
 
         async function apiJson(url, options = {}) {
             const response = await fetch(url, {
@@ -331,6 +335,7 @@
             results.textContent = '';
             try {
                 const scan = await apiJson('/station-scan');
+                lastScan = scan;
                 if (scan.error) {
                     results.textContent = scan.error;
                 } else if (!scan.networks.length) {
@@ -342,11 +347,19 @@
                         note.textContent = 'Recently seen networks (a live scan was not possible right now):';
                         results.appendChild(note);
                     }
+                    if (scan.restricted) {
+                        const note = document.createElement('div');
+                        note.className = 'hint';
+                        note.textContent = 'The access point shares this card, so the unit joins on a band the access point can share (greyed-out entries are skipped).';
+                        results.appendChild(note);
+                    }
                     scan.networks.forEach(net => {
                         const b = document.createElement('button');
                         b.type = 'button';
                         const signal = net.signal === null ? '' : ` · ${net.signal} dBm`;
-                        b.textContent = `${net.ssid} · ${net.band} ch ${net.channel}${signal}`;
+                        const shareNote = net.apShareable ? '' : ' · access point can\'t share this band';
+                        b.textContent = `${net.ssid} · ${net.band} ch ${net.channel}${signal}${shareNote}`;
+                        if (!net.apShareable) b.className = 'not-shareable';
                         b.onclick = () => {
                             document.getElementById('ssid').value = net.ssid;
                             document.getElementById('psk').focus();
@@ -369,10 +382,17 @@
                 alert('Enter or pick a network name.');
                 return;
             }
-            const warning = stationShared
+            let warning = stationShared
                 ? `The unit will now connect to "${ssid}".\n\nThe cast access point switches off for up to a minute while it connects. ` +
                   'If you are connected through the access point, reconnect to it afterwards and reopen this page.'
                 : `The unit will now connect to "${ssid}".`;
+            if (lastScan && lastScan.restricted) {
+                const seen = lastScan.networks.filter(net => net.ssid === ssid);
+                if (seen.length && !seen.some(net => net.apShareable)) {
+                    warning += `\n\nNote: "${ssid}" was only seen on bands the access point can't share, ` +
+                        'so the unit will probably not connect. A second Wi-Fi card for the access point avoids this.';
+                }
+            }
             if (!confirm(warning)) return;
             try {
                 await apiJson('/station-connect', {

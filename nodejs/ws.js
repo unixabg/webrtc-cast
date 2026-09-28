@@ -415,6 +415,18 @@ const STATION_FORGET_SCRIPT =
     'if [ "$2" = 1 ]; then systemctl restart hostapd; fi; ' +
     'exit 0';
 
+// In --shared mode the station and the AP use one radio. Keeping the station on
+// channels where the AP may also run lets them share one channel; otherwise the
+// radio time-slices, which drops AP clients on some cards (contrib/wifi-cards.md).
+// Returns the allowed frequencies (MHz), or null when there's no restriction.
+async function apShareableFreqs(cfg) {
+    if (!cfg || cfg.MODE !== 'shared') return null;
+    const tool = fs.existsSync(AP_SETUP_TOOL) ? AP_SETUP_TOOL : path.join(__dirname, '../contrib/ap-setup.sh');
+    const r = await runFile('bash', [tool, 'ap-freqs']);
+    const freqs = r.stdout.trim().split(/\s+/).filter(f => /^[0-9]{4}$/.test(f)).map(Number);
+    return freqs.length ? freqs : null;
+}
+
 // Access point status (read-only)
 app.get('/ap-status', checkToken, async (req, res) => {
     const cfg = readApConfig();
@@ -503,7 +515,8 @@ app.get('/station-status', checkToken, async (req, res) => {
 
 // Nearby networks for the station card
 app.get('/station-scan', checkToken, async (req, res) => {
-    const iface = stationIface(readApConfig());
+    const cfg = readApConfig();
+    const iface = stationIface(cfg);
     if (!iface) {
         return res.status(400).json({ error: 'No Wi-Fi card is available for the station.' });
     }
@@ -522,16 +535,18 @@ app.get('/station-scan', checkToken, async (req, res) => {
         const signal = Number((block.match(/^\s*signal: (-?[0-9.]+)/m) || [])[1]);
         if (!ssidRaw || !freq) continue; // hidden network or incomplete entry
         const ssid = decodeIwSsid(ssidRaw);
-        const entry = { ssid, band: bandOf(freq), channel: freqToChannel(freq), signal: Number.isFinite(signal) ? Math.round(signal) : null };
+        const entry = { ssid, freq: Math.round(Number(freq)), band: bandOf(freq), channel: freqToChannel(freq), signal: Number.isFinite(signal) ? Math.round(signal) : null };
         const key = `${ssid}|${entry.band}`;
         if (!best.has(key) || (entry.signal ?? -999) > (best.get(key).signal ?? -999)) best.set(key, entry);
     }
     const networks = [...best.values()].sort((a, b) => (b.signal ?? -999) - (a.signal ?? -999));
-    res.json({ networks, cached, error: !r.ok ? 'Scan failed; type the network name instead.' : '' });
+    const allowed = await apShareableFreqs(cfg);
+    networks.forEach(net => { net.apShareable = !allowed || allowed.includes(net.freq); });
+    res.json({ networks, cached, restricted: !!allowed, error: !r.ok ? 'Scan failed; type the network name instead.' : '' });
 });
 
 // Save the station network and connect now
-app.post('/station-connect', checkToken, (req, res) => {
+app.post('/station-connect', checkToken, async (req, res) => {
     const { ssid, psk } = req.body || {};
     if (!isValidSsid(ssid)) {
         return res.status(400).json({ error: 'Invalid network name: 1-32 characters, no control characters or leading/trailing spaces.' });
@@ -546,13 +561,19 @@ app.post('/station-connect', checkToken, (req, res) => {
     }
     const shared = !!(cfg && cfg.MODE === 'shared');
     console.log(`Station ${iface}: connecting to ${JSON.stringify(ssid)}`); // never log the password
-    const config = [
+    const lines = [
         `allow-hotplug ${iface}`,
         `iface ${iface} inet dhcp`,
         `    wpa-ssid ${ssid}`,
-        `    wpa-psk ${psk}`,
-        ''
-    ].join('\n');
+        `    wpa-psk ${psk}`
+    ];
+    const allowed = await apShareableFreqs(cfg);
+    if (allowed) {
+        // keep the station where the shared AP can follow it (one channel, no time-slicing)
+        lines.push(`    wpa-freq-list ${allowed.join(' ')}`);
+    }
+    lines.push('');
+    const config = lines.join('\n');
     const file = stationConfigPath(iface);
     sudoWriteFile(file, config, async (error) => {
         if (error) {

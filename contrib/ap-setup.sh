@@ -16,7 +16,9 @@
 #                        hostapd starts, the AP takes the uplink's channel if
 #                        the card allows an AP there; otherwise, on cards that
 #                        can use two channels, it keeps its own 2.4 GHz channel
-#                        (time-sliced). Run "check" to see what a card can do.
+#                        (time-sliced). A timer restarts hostapd if the station
+#                        later moves to another channel. Run "check" to see
+#                        what a card can do; tested cards: contrib/wifi-cards.md
 #
 # Usage:
 #   ap-setup.sh install --ssid NAME --passphrase PASS [options]
@@ -44,6 +46,8 @@ DNSMASQ_DROPIN="$ROOT/etc/systemd/system/dnsmasq.service.d/webrtc-cast-ap.conf"
 SYSCTL_CONF="$ROOT/etc/sysctl.d/90-webrtc-cast-ap.conf"
 NFT_CONF="$ROOT/etc/webrtc-cast-ap/nat.nft"
 NM_CONF="$ROOT/etc/NetworkManager/conf.d/webrtc-cast-ap.conf"
+DRIFT_SERVICE="$ROOT/etc/systemd/system/webrtc-cast-ap-drift.service"
+DRIFT_TIMER="$ROOT/etc/systemd/system/webrtc-cast-ap-drift.timer"
 
 log()  { echo "$PROG: $*"; }
 warn() { echo "$PROG: WARNING: $*" >&2; }
@@ -352,6 +356,30 @@ describe_status() {
     esac
 }
 
+# "vendor:device" of a card, e.g. 168c:003e (PCI) or 0e8d:7612 (USB), if known.
+card_id() {
+    local dev vendor device
+    dev=$(readlink -f "/sys/class/net/$1/device" 2>/dev/null) || return 0
+    if [ -r "$dev/vendor" ] && [ -r "$dev/device" ]; then
+        vendor=$(cat "$dev/vendor"); device=$(cat "$dev/device")
+        echo "${vendor#0x}:${device#0x}"
+    elif [ -r "$dev/../idVendor" ] && [ -r "$dev/../idProduct" ]; then
+        echo "$(cat "$dev/../idVendor"):$(cat "$dev/../idProduct")"
+    fi
+}
+
+# Results seen on real hardware (details in contrib/wifi-cards.md). What the
+# driver advertises isn't always what works, so tested cards get a note.
+known_card_notes() {
+    case "$(card_id "$1")" in
+        168c:003e)
+            echo "Tested (contrib/wifi-cards.md): QCA6174 is stable as a dedicated AP (all night);"
+            echo "station + AP on one shared channel works but the firmware stalls about hourly;"
+            echo "on two channels (time-sliced) it drops AP clients within minutes."
+            echo ;;
+    esac
+}
+
 # Report what the card can do, in plain language. Returns 0 if nothing wrong
 # was found for the requested mode, 1 otherwise. $3/$4: configured AP channel.
 check_card() {
@@ -439,7 +467,8 @@ check_card() {
     elif [ "$channels" -eq 1 ]; then
         echo "  same channel only (the AP must share the uplink's channel)"
     else
-        echo "  yes, up to $channels channels (the radio time-slices between them)"
+        echo "  yes, up to $channels channels (the radio time-slices between them;"
+        echo "  on some cards that drops AP clients, so one shared channel is preferred)"
     fi
     echo
 
@@ -468,7 +497,7 @@ check_card() {
             verdict_5="works: AP shares the uplink channel (if it isn't a DFS channel)"
             [ "$channels" -lt 2 ] || [ "${ok24:-0}" -eq 0 ] || verdict_5="$verdict_5, else 2.4 GHz time-sliced"
         elif [ "$channels" -ge 2 ] && [ "${ok24:-0}" -gt 0 ]; then
-            verdict_5="works: AP stays on 2.4 GHz, time-sliced (slower)"
+            verdict_5="time-sliced: AP on 2.4 GHz, may drop AP clients; prefer 2.4 GHz uplink"
         else
             verdict_5="not possible: use a second card for the AP"
         fi
@@ -500,6 +529,8 @@ check_card() {
         fi
         echo
     fi
+
+    known_card_notes "$iface"
 
     case "$driver" in
         iwlwifi)
@@ -610,6 +641,38 @@ cmd_sync_channel() {
     else
         log "uplink on channel $uch; AP on its own channel $ch (time-sliced)"
     fi
+}
+
+# Print the frequencies (MHz) where this card may start an AP, space-separated
+# (no DFS, no-IR, disabled or 6 GHz channels). The setup page uses this to keep
+# the station on channels the AP can share, which avoids time-slicing.
+cmd_ap_freqs() {
+    load_config
+    local phy
+    phy=$(cat "/sys/class/net/$IFACE/phy80211/name" 2>/dev/null) || exit 1
+    phy_channel_list "$phy" | awk '$3 == "ok" && $1 < 5925 { printf "%s%s", sep, $1; sep = " " } END { print "" }'
+}
+
+# --shared: run every minute by webrtc-cast-ap-drift.timer. hostapd only picks
+# its channel when it starts; if the station later reconnects on another channel
+# (a router on "auto" moves), restart hostapd so the AP follows it again instead
+# of silently falling back to time-slicing.
+cmd_check_drift() {
+    load_config
+    [ "$MODE" = shared ] || exit 0
+    systemctl is-active --quiet hostapd || exit 0
+    local freq cur phy chanlist ch mode how
+    freq=$(iw dev "$IFACE" link 2>/dev/null | awk '/freq:/ { print $2; exit }')
+    [ -n "$freq" ] || exit 0
+    cur=$(iw dev "$AP_IFACE" info 2>/dev/null | awk '$1 == "channel" { print $2; exit }')
+    [ -n "$cur" ] || exit 0
+    phy=$(cat "/sys/class/net/$IFACE/phy80211/name" 2>/dev/null) || exit 0
+    chanlist=$(phy_channel_list "$phy")
+    read -r ch mode how <<<"$(decide_ap_channel "$chanlist" "${CHANNELS:-1}" "$freq" "${AP_CHANNEL:-6}" "${AP_HWMODE:-g}")"
+    [ "$ch" != none ] || exit 0
+    [ "$ch" != "$cur" ] || exit 0
+    log "station now on channel $(freq_to_channel "${freq%.*}" 2>/dev/null || echo "?"); AP on $cur should be on $ch ($how): restarting hostapd"
+    systemctl restart hostapd
 }
 
 # ---------------------------------------------------------------- install
@@ -731,6 +794,21 @@ cmd_install() {
         [ "$forward" = 0 ] || pkgs="$pkgs nftables"
         # shellcheck disable=SC2086
         apt-get install -y $pkgs
+    fi
+
+    # --- a previous install: stop it while its config and helper are still in
+    # place, so its interface teardown (e.g. removing a shared-mode ap0) runs
+    if [ -z "$ROOT" ] && [ -r "$CONF_DEFAULT" ]; then
+        local old_mode old_ap
+        old_mode=$(sed -n 's/^MODE=//p' "$CONF_DEFAULT")
+        old_ap=$(sed -n 's/^AP_IFACE=//p' "$CONF_DEFAULT")
+        if systemd_running; then
+            log "stopping the previous access point ..."
+            systemctl stop webrtc-cast-ap-drift.timer hostapd.service dnsmasq.service webrtc-cast-ap.service 2>/dev/null || true
+        fi
+        if [ "$old_mode" = shared ] && valid_ifname "$old_ap" && [ -e "/sys/class/net/$old_ap" ]; then
+            iw dev "$old_ap" del 2>/dev/null || true
+        fi
     fi
 
     # --- files
@@ -879,6 +957,33 @@ EOF
         printf '[keyfile]\nunmanaged-devices=interface-name:%s\n' "$AP_IFACE" > "$NM_CONF"
     fi
 
+    if [ "$shared" = 1 ]; then
+        cat > "$DRIFT_SERVICE" <<EOF
+# Written by contrib/ap-setup.sh
+[Unit]
+Description=webrtc-cast access point: follow the station's channel
+After=hostapd.service
+
+[Service]
+Type=oneshot
+ExecStart=$SELF_INSTALL check-drift
+EOF
+        cat > "$DRIFT_TIMER" <<EOF
+# Written by contrib/ap-setup.sh
+[Unit]
+Description=webrtc-cast access point: check the station's channel every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+    else
+        rm -f "$DRIFT_SERVICE" "$DRIFT_TIMER"
+    fi
+
     if [ -z "$ROOT" ]; then
         install -m 0755 "$0" "$SELF_INSTALL"
     else
@@ -891,12 +996,18 @@ EOF
         systemctl daemon-reload 2>/dev/null || true
         systemctl unmask hostapd
         systemctl enable webrtc-cast-ap.service hostapd.service dnsmasq.service
+        if [ "$shared" = 1 ]; then
+            systemctl enable webrtc-cast-ap-drift.timer
+        else
+            systemctl disable webrtc-cast-ap-drift.timer 2>/dev/null || true
+        fi
         if systemd_running && [ "$nostart" = 0 ]; then
             [ "$forward" = 0 ] || sysctl -q -p "$SYSCTL_CONF"
             log "starting the access point ..."
             systemctl restart webrtc-cast-ap.service
             systemctl restart hostapd.service dnsmasq.service ||
                 warn "a service failed to start; see: journalctl -u hostapd -u dnsmasq -u webrtc-cast-ap"
+            [ "$shared" = 0 ] || systemctl restart webrtc-cast-ap-drift.timer
         else
             log "services enabled; they start on next boot"
         fi
@@ -929,12 +1040,13 @@ cmd_uninstall() {
     fi
 
     if [ -z "$ROOT" ]; then
+        systemctl disable --now webrtc-cast-ap-drift.timer 2>/dev/null || true
         systemctl disable --now hostapd.service dnsmasq.service 2>/dev/null || true
         systemctl disable --now webrtc-cast-ap.service 2>/dev/null || true
     fi
 
     rm -f "$AP_UNIT" "$HOSTAPD_DROPIN" "$DNSMASQ_DROPIN" "$DNSMASQ_CONF" \
-          "$SYSCTL_CONF" "$NFT_CONF" "$NM_CONF" "$CONF_DEFAULT"
+          "$SYSCTL_CONF" "$NFT_CONF" "$NM_CONF" "$CONF_DEFAULT" "$DRIFT_SERVICE" "$DRIFT_TIMER"
     rmdir "$(dirname "$HOSTAPD_DROPIN")" "$(dirname "$DNSMASQ_DROPIN")" "$(dirname "$NFT_CONF")" 2>/dev/null || true
 
     if [ -f "$HOSTAPD_CONF.webrtc-cast-ap.bak" ]; then
@@ -991,6 +1103,8 @@ case "${1-}" in
     iface-down)   cmd_iface_down ;;
     sync-channel) cmd_sync_channel ;;
     route-up)     cmd_route_up ;;
+    check-drift)  cmd_check_drift ;;
+    ap-freqs)     cmd_ap_freqs ;;
     -h|--help|"") usage ;;
     *)            die "unknown command: $1 (see --help)" ;;
 esac
