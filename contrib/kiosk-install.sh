@@ -30,7 +30,8 @@ apt-get -y install \
     dmidecode curl git sudo openssl ca-certificates \
     chromium lightdm metacity \
     xserver-xorg x11-xserver-utils \
-    nodejs npm alsa-utils
+    nodejs npm alsa-utils \
+    iw wpasupplicant
 
 echo "Adding kiosk user ..."
 adduser --quiet --disabled-password --shell /bin/bash \
@@ -95,6 +96,13 @@ sh /home/kiosk/webrtc-cast/contrib/display-mode.sh
 # Start WebRTC-cast server
 echo "Starting the WebRTC-cast services ..."
 cd /home/kiosk/webrtc-cast
+# A LightDM restart doesn't stop a server from the previous session; it would
+# keep port 8443 (and old code after an update), so stop it first.
+pkill -u kiosk -f 'nodejs/ws.js'
+for i in 1 2 3 4 5; do
+    pgrep -u kiosk -f 'nodejs/ws.js' >/dev/null || break
+    sleep 1
+done
 nodejs nodejs/ws.js &
 
 # Clear Chromium cache and config
