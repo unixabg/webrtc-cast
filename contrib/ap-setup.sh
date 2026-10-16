@@ -824,6 +824,13 @@ cmd_set() {
         fi
     fi
 
+    # Keep the installed helper (run by the systemd units) in step with this
+    # script, e.g. after a git pull of webrtc-cast.
+    if [ -z "$ROOT" ] && [ -f "$0" ] && ! cmp -s "$0" "$SELF_INSTALL"; then
+        install -m 0755 "$0" "$SELF_INSTALL"
+        log "updated $SELF_INSTALL"
+    fi
+
     if [ "$restart" = 1 ] && systemd_running; then
         log "restarting the access point ..."
         systemctl restart hostapd.service || warn "hostapd failed to restart; see: journalctl -u hostapd"

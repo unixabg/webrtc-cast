@@ -299,7 +299,10 @@ app.get('/get-hostname', (req, res) => {
 // connection) is an ifupdown stanza for the station card, applied right away.
 
 const AP_CONFIG_FILE = '/etc/default/webrtc-cast-ap';
-const AP_SETUP_TOOL = '/usr/local/sbin/webrtc-cast-ap';
+// The repo's own copy, so the setup page and the script always match (after a
+// git pull the installed /usr/local/sbin/webrtc-cast-ap can be older until the
+// next install; "set" refreshes it).
+const AP_SETUP_TOOL = path.join(__dirname, '../contrib/ap-setup.sh');
 
 function isValidIfname(name) {
     return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,15}$/.test(name);
@@ -419,8 +422,7 @@ const STATION_FORGET_SCRIPT =
 // ap-freqs), or null when unknown.
 async function apFreqs(cfg) {
     if (!cfg) return null;
-    const tool = fs.existsSync(AP_SETUP_TOOL) ? AP_SETUP_TOOL : path.join(__dirname, '../contrib/ap-setup.sh');
-    const r = await runFile('bash', [tool, 'ap-freqs']);
+    const r = await runFile('bash', [AP_SETUP_TOOL, 'ap-freqs']);
     const freqs = r.stdout.trim().split(/\s+/).filter(f => /^[0-9]{4}$/.test(f)).map(Number);
     return freqs.length ? freqs : null;
 }
@@ -517,8 +519,7 @@ app.get('/ap-card-report', checkToken, async (req, res) => {
     if (!iface) {
         return res.type('text/plain').send('No Wi-Fi card found.');
     }
-    const tool = fs.existsSync(AP_SETUP_TOOL) ? AP_SETUP_TOOL : path.join(__dirname, '../contrib/ap-setup.sh');
-    const args = [tool, 'check', '--iface', iface];
+    const args = [AP_SETUP_TOOL, 'check', '--iface', iface];
     if (!cfg || cfg.MODE === 'shared') args.push('--shared');
     const r = await runFile('bash', args, 30000);
     res.type('text/plain').send((r.stdout + r.stderr).trim() || 'The card check produced no output.');
@@ -533,7 +534,7 @@ app.post('/ap-settings', checkToken, async (req, res) => {
         return res.status(400).json({ error: 'No access point is installed.' });
     }
     const { ssid, passphrase, band, channel, timeSlice } = req.body || {};
-    const args = [AP_SETUP_TOOL, 'set'];
+    const args = ['/bin/bash', AP_SETUP_TOOL, 'set'];
     if (ssid !== undefined && ssid !== '') {
         if (!isValidSsid(ssid)) {
             return res.status(400).json({ error: 'Invalid network name: 1-32 characters, no control characters or leading/trailing spaces.' });
@@ -569,10 +570,10 @@ app.post('/ap-settings', checkToken, async (req, res) => {
         }
         if (on !== (cfg.TIME_SLICE === '1')) args.push('--time-slice', on ? 'on' : 'off');
     }
-    if (args.length === 2) {
+    if (args.length === 3) {
         return res.status(400).json({ error: 'Nothing to change.' });
     }
-    console.log(`Access point settings: ${args.slice(2).join(' ')}`);
+    console.log(`Access point settings: ${args.slice(3).join(' ')}`);
     if (passFile) {
         const made = await runFile('sudo', ['install', '-m', '600', '/dev/null', passFile]);
         const written = made.ok && await new Promise(resolve =>
