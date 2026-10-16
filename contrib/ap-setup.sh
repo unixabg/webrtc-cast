@@ -57,6 +57,8 @@ usage() {
     cat <<'EOF'
 Usage:
   ap-setup.sh install --ssid NAME --passphrase PASS [options]
+  ap-setup.sh set [--ssid NAME] [--passphrase PASS] [--band 2.4|5 --channel N]
+                  [--time-slice on|off]
   ap-setup.sh check [--iface IF] [--shared]
   ap-setup.sh uninstall [--purge]
 
@@ -87,8 +89,21 @@ install options:
                          casting does not need it. Clients always get the
                          station as gateway; without --forward it just
                          doesn't pass their traffic on.
+  --time-slice           --shared on cards that can use two channels: let the
+                         station use any band and keep the AP on its own
+                         channel when it can't share the station's (the radio
+                         time-slices). Default: keep the station on channels
+                         the AP can share. Only for cards tested stable this
+                         way (see contrib/wifi-cards.md).
   --strict               Stop if the card check finds a problem (default: warn)
   --no-start             Enable services but don't start them now
+
+set options (change an installed access point; restarts it):
+  --ssid NAME, --passphrase PASS   As for install
+  --passphrase-file FILE           Read the passphrase from FILE (then delete it)
+  --band 2.4|5 --channel N         The AP's own channel; must be one where the
+                                   card may start an AP (see check)
+  --time-slice on|off              As for install (--shared only)
 
 check options:
   --iface IF, --shared   As above; reports what the card can do: bands and
@@ -113,6 +128,33 @@ systemd_running() {
 }
 
 valid_ifname() { [[ "$1" =~ ^[A-Za-z0-9_.-]{1,15}$ ]]; }
+
+# Exit with a message if an SSID/passphrase isn't valid for hostapd.
+check_ssid() {
+    [ -n "$1" ] || die "--ssid is required"
+    [[ "$1" =~ [[:cntrl:]] ]] && die "--ssid must not contain control characters"
+    [ "$(printf '%s' "$1" | wc -c)" -le 32 ] || die "--ssid is longer than 32 bytes"
+    return 0
+}
+check_passphrase() {
+    [[ "$1" =~ ^[\ -~]{8,63}$ ]] || die "--passphrase must be 8-63 printable ASCII characters"
+}
+
+# Replace KEY=... in a KEY=VALUE file (or append it), keeping the file's owner
+# and mode. The value is passed through the environment, so any characters in
+# it (/, &, \, quotes) are written literally.
+set_conf_value() {
+    local file=$1 key=$2 value=$3 tmp
+    tmp=$(mktemp)
+    KEY=$key VALUE=$value awk '
+        BEGIN { k = ENVIRON["KEY"] "="; v = ENVIRON["VALUE"] }
+        index($0, k) == 1 { print k v; done = 1; next }
+        { print }
+        END { if (!done) print k v }
+    ' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
 
 valid_ipv4() {
     local ip=$1 o
@@ -370,12 +412,26 @@ card_id() {
 
 # Results seen on real hardware (details in contrib/wifi-cards.md). What the
 # driver advertises isn't always what works, so tested cards get a note.
+# True if the running kernel is at least version $1.$2.
+kernel_at_least() {
+    local v major minor
+    v=$(uname -r)
+    major=${v%%.*}; v=${v#*.}; minor=${v%%[!0-9]*}
+    [ "${major:-0}" -gt "$1" ] || { [ "${major:-0}" -eq "$1" ] && [ "${minor:-0}" -ge "$2" ]; }
+}
+
 known_card_notes() {
     case "$(card_id "$1")" in
         168c:003e)
-            echo "Tested (contrib/wifi-cards.md): QCA6174 is stable as a dedicated AP (all night);"
-            echo "station + AP on one shared channel works but the firmware stalls about hourly;"
-            echo "on two channels (time-sliced) it drops AP clients within minutes."
+            echo "Tested (contrib/wifi-cards.md): QCA6174 is stable as a dedicated AP (all night)."
+            if kernel_at_least 7 2; then
+                echo "On kernel 7.2 (tested 7.2.6) station + AP on two channels (time-sliced) ran"
+                echo "stable overnight, so install --shared --time-slice is reasonable on this kernel."
+            else
+                echo "On kernel 6.12 station + AP on two channels (time-sliced) dropped AP clients"
+                echo "within minutes and one shared channel stalled about hourly; kernel 7.2"
+                echo "(trixie-backports) fixed the two-channel drops in testing."
+            fi
             echo ;;
     esac
 }
@@ -675,12 +731,111 @@ cmd_check_drift() {
     systemctl restart hostapd
 }
 
+# Change an installed access point: name, passphrase, its own channel/band, or
+# time-slicing. Used by the setup page (as root, via sudo) and by hand.
+cmd_set() {
+    local ssid="" pass="" band="" channel="" timeslice="" ssid_set=0 pass_set=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --ssid) ssid=${2-}; ssid_set=1; shift 2 ;;
+            --passphrase) pass=${2-}; pass_set=1; shift 2 ;;
+            --passphrase-file)
+                # keeps the passphrase off command lines (ps, the journal);
+                # the setup page uses this, and the file is removed after reading
+                [ -r "${2-}" ] || die "can't read ${2-}"
+                IFS= read -r pass < "$2" || true
+                rm -f "$2"
+                pass_set=1; shift 2 ;;
+            --band) band=${2-}; shift 2 ;;
+            --channel) channel=${2-}; shift 2 ;;
+            --time-slice) timeslice=${2-}; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "unknown option: $1 (see --help)" ;;
+        esac
+    done
+    need_root
+    [ -r "$CONF_DEFAULT" ] || die "no access point is installed (run install first)"
+    # shellcheck disable=SC1090
+    . "$CONF_DEFAULT"
+    [ -w "$HOSTAPD_CONF" ] || die "$HOSTAPD_CONF not found"
+
+    # --- validate everything before changing anything
+    [ "$ssid_set" = 0 ] || check_ssid "$ssid"
+    [ "$pass_set" = 0 ] || check_passphrase "$pass"
+
+    local hw_mode=""
+    if [ -n "$band" ] || [ -n "$channel" ]; then
+        [ -n "$channel" ] || die "--channel is required with --band"
+        [[ "$channel" =~ ^[0-9]{1,3}$ ]] || die "--channel must be a channel number"
+        if [ -z "$band" ]; then
+            if [ "$channel" -le 14 ]; then band=2.4; else band=5; fi
+        fi
+        case "$band" in
+            2.4) hw_mode=g; [ "$channel" -le 14 ] || die "channel $channel is not a 2.4 GHz channel" ;;
+            5)   hw_mode=a; [ "$channel" -ge 32 ] || die "channel $channel is not a 5 GHz channel" ;;
+            *)   die "--band must be 2.4 or 5" ;;
+        esac
+        if [ -z "$ROOT" ]; then
+            local phy st
+            phy=$(cat "/sys/class/net/$IFACE/phy80211/name" 2>/dev/null) || die "can't find the card $IFACE"
+            st=$(channel_status "$(phy_channel_list "$phy")" "$channel")
+            [ "$st" = ok ] || die "this card can't start an AP on channel $channel: it is $(describe_status "$st")"
+        fi
+    fi
+
+    case "$timeslice" in
+        "") ;;
+        on|1)
+            [ "$MODE" = shared ] || die "--time-slice only applies to an access point installed with --shared"
+            [ "${CHANNELS:-1}" -ge 2 ] || die "this card can't use two channels at once"
+            timeslice=1 ;;
+        off|0) timeslice=0 ;;
+        *) die "--time-slice must be on or off" ;;
+    esac
+
+    if [ "$ssid_set" = 0 ] && [ "$pass_set" = 0 ] && [ -z "$hw_mode" ] && [ -z "$timeslice" ]; then
+        die "nothing to change (see --help)"
+    fi
+
+    # --- apply
+    local restart=0
+    if [ "$ssid_set" = 1 ]; then
+        set_conf_value "$HOSTAPD_CONF" ssid "$ssid"; restart=1
+        log "network name set to \"$ssid\""
+    fi
+    if [ "$pass_set" = 1 ]; then
+        set_conf_value "$HOSTAPD_CONF" wpa_passphrase "$pass"; restart=1
+        log "passphrase changed"
+    fi
+    if [ -n "$hw_mode" ]; then
+        set_conf_value "$CONF_DEFAULT" AP_CHANNEL "$channel"
+        set_conf_value "$CONF_DEFAULT" AP_HWMODE "$hw_mode"
+        set_conf_value "$HOSTAPD_CONF" channel "$channel"
+        set_conf_value "$HOSTAPD_CONF" hw_mode "$hw_mode"
+        restart=1
+        log "AP channel set to $channel ($band GHz)"
+    fi
+    if [ -n "$timeslice" ]; then
+        set_conf_value "$CONF_DEFAULT" TIME_SLICE "$timeslice"
+        if [ "$timeslice" = 1 ]; then
+            log "time-slicing on: the station may use any band (takes effect when it next connects)"
+        else
+            log "time-slicing off: the station is kept on channels the AP can share (when it next connects)"
+        fi
+    fi
+
+    if [ "$restart" = 1 ] && systemd_running; then
+        log "restarting the access point ..."
+        systemctl restart hostapd.service || warn "hostapd failed to restart; see: journalctl -u hostapd"
+    fi
+}
+
 # ---------------------------------------------------------------- install
 
 cmd_install() {
     local ssid="" pass="" iface="" shared=0 address="192.168.11.1/24" range=""
     local band="2.4" channel="" country="US" alias="cast" domain="home.arpa" isolate=1 forward=0
-    local strict=0 nostart=0
+    local strict=0 nostart=0 timeslice=0
     AP_IFACE=ap0
 
     while [ $# -gt 0 ]; do
@@ -705,6 +860,7 @@ cmd_install() {
                     warn "--forward no longer takes an interface name; ignoring '$1'"
                     shift
                 fi ;;
+            --time-slice) timeslice=1; shift ;;
             --strict) strict=1; shift ;;
             --no-start) nostart=1; shift ;;
             -h|--help) usage; exit 0 ;;
@@ -716,10 +872,8 @@ cmd_install() {
     [ -f "$0" ] || die "run this script from a file (not piped into bash); it installs a copy of itself"
 
     # --- validate
-    [ -n "$ssid" ] || die "--ssid is required"
-    [[ "$ssid" =~ [[:cntrl:]] ]] && die "--ssid must not contain control characters"
-    [ "$(printf '%s' "$ssid" | wc -c)" -le 32 ] || die "--ssid is longer than 32 bytes"
-    [[ "$pass" =~ ^[\ -~]{8,63}$ ]] || die "--passphrase must be 8-63 printable ASCII characters"
+    check_ssid "$ssid"
+    check_passphrase "$pass"
 
     [[ "$address" =~ ^([0-9.]+)/([0-9]{1,2})$ ]] || die "--address must look like 192.168.11.1/24"
     local ap_ip=${BASH_REMATCH[1]} prefix=${BASH_REMATCH[2]}
@@ -778,6 +932,15 @@ cmd_install() {
             warn "card check found problems; continuing anyway (use --strict to stop)"
         fi
     fi
+    if [ "$timeslice" = 1 ]; then
+        if [ "$shared" = 0 ]; then
+            warn "--time-slice only applies to --shared; ignoring it"
+            timeslice=0
+        elif [ -z "$ROOT" ] && [ "$channels" -lt 2 ]; then
+            warn "this card can't use two channels at once; ignoring --time-slice"
+            timeslice=0
+        fi
+    fi
 
     if [ "$shared" = 0 ] && [ -z "$ROOT" ]; then
         if grep -qsE "^[[:space:]]*(auto|allow-hotplug|iface)[[:space:]]+$iface\b" /etc/network/interfaces /etc/network/interfaces.d/* 2>/dev/null; then
@@ -828,6 +991,10 @@ FORWARD=$forward
 CHANNELS=$channels
 AP_CHANNEL=$channel
 AP_HWMODE=$hw_mode
+# 1 = the station may use any band; the AP keeps its own channel when it can't
+# share the station's (radio time-slices). 0 = keep the station on channels the
+# AP can share. Changed with "set --time-slice on|off".
+TIME_SLICE=$timeslice
 EOF
 
     if [ -f "$HOSTAPD_CONF" ] && [ ! -f "$HOSTAPD_CONF.webrtc-cast-ap.bak" ] &&
@@ -1099,6 +1266,7 @@ case "${1-}" in
     install)      shift; cmd_install "$@" ;;
     uninstall)    shift; cmd_uninstall "$@" ;;
     check)        shift; cmd_check "$@" ;;
+    set)          shift; cmd_set "$@" ;;
     iface-up)     cmd_iface_up ;;
     iface-down)   cmd_iface_down ;;
     sync-channel) cmd_sync_channel ;;

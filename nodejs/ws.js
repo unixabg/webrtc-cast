@@ -394,7 +394,7 @@ async function ipv4Of(iface) {
 // $1 = station card, $2 = 1 when the AP shares the card and must be paused.
 function startStationJob(name, script, iface, shared) {
     const unit = `webrtc-cast-${name}-${Date.now()}`;
-    execFile('sudo', ['systemd-run', '--collect', '--quiet', '--unit', unit, '--',
+    execFile('sudo', ['systemd-run', '--collect', '--quiet', '--unit', unit, '--description', `webrtc-cast ${name}`, '--',
         '/bin/sh', '-c', script, 'sh', iface, shared ? '1' : '0'], { env: SYSTEM_ENV }, (error) => {
         if (error) console.error(`Failed to start ${unit}: ${error.message}`);
         else console.log(`Started ${unit} for ${iface}.`);
@@ -415,16 +415,42 @@ const STATION_FORGET_SCRIPT =
     'if [ "$2" = 1 ]; then systemctl restart hostapd; fi; ' +
     'exit 0';
 
-// In --shared mode the station and the AP use one radio. Keeping the station on
-// channels where the AP may also run lets them share one channel; otherwise the
-// radio time-slices, which drops AP clients on some cards (contrib/wifi-cards.md).
-// Returns the allowed frequencies (MHz), or null when there's no restriction.
-async function apShareableFreqs(cfg) {
-    if (!cfg || cfg.MODE !== 'shared') return null;
+// Frequencies (MHz) where the AP card may start an AP (from ap-setup.sh
+// ap-freqs), or null when unknown.
+async function apFreqs(cfg) {
+    if (!cfg) return null;
     const tool = fs.existsSync(AP_SETUP_TOOL) ? AP_SETUP_TOOL : path.join(__dirname, '../contrib/ap-setup.sh');
     const r = await runFile('bash', [tool, 'ap-freqs']);
     const freqs = r.stdout.trim().split(/\s+/).filter(f => /^[0-9]{4}$/.test(f)).map(Number);
     return freqs.length ? freqs : null;
+}
+
+// In --shared mode the station and the AP use one radio. Unless time-slicing
+// is on, keep the station on channels where the AP may also run, so they share
+// one channel; time-slicing drops AP clients on some cards/kernels
+// (contrib/wifi-cards.md).
+function apKeepsStationShareable(cfg) {
+    return !!(cfg && cfg.MODE === 'shared' && cfg.TIME_SLICE !== '1');
+}
+
+const FREQS_24 = [2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462, 2467, 2472];
+
+// The station's wpa-freq-list for a band choice: 'auto' (follow the AP's
+// time-slicing setting), 'any' or '2.4'. null means no limit.
+async function stationFreqList(band, cfg) {
+    if (band === '2.4') return FREQS_24;
+    if (band === 'any') return null;
+    return apKeepsStationShareable(cfg) ? apFreqs(cfg) : null;
+}
+
+// Run a command detached from this server (via systemd-run).
+function startDetached(name, argv) {
+    const unit = `webrtc-cast-${name}-${Date.now()}`;
+    // a fixed description, so the arguments never show up in the journal
+    execFile('sudo', ['systemd-run', '--collect', '--quiet', '--unit', unit, '--description', `webrtc-cast ${name}`, '--', ...argv], { env: SYSTEM_ENV }, (error) => {
+        if (error) console.error(`Failed to start ${unit}: ${error.message}`);
+        else console.log(`Started ${unit}.`);
+    });
 }
 
 // Access point status (read-only)
@@ -457,6 +483,11 @@ app.get('/ap-status', checkToken, async (req, res) => {
         const dns = fs.readFileSync('/etc/dnsmasq.d/webrtc-cast-ap.conf', 'utf8');
         names = [...dns.matchAll(/^address=\/([^/]+)\//gm)].map(m => m[1]);
     } catch (err) { /* not readable: leave empty */ }
+    const allowedChannels = { '2.4': [], '5': [] };
+    for (const f of (await apFreqs(cfg)) || []) {
+        const ch = freqToChannel(f);
+        if (ch !== null) allowedChannels[f < 3000 ? '2.4' : '5'].push(ch);
+    }
     res.json({
         installed: true,
         mode: cfg.MODE || '',
@@ -468,6 +499,11 @@ app.get('/ap-status', checkToken, async (req, res) => {
         channel,
         band,
         configuredChannel: confValue('channel'),
+        apChannel: Number(cfg.AP_CHANNEL) || null,
+        apBand: cfg.AP_HWMODE === 'a' ? '5' : '2.4',
+        allowedChannels,
+        timeSlice: cfg.TIME_SLICE === '1',
+        canTimeSlice: cfg.MODE === 'shared' && Number(cfg.CHANNELS || 1) >= 2,
         services,
         clients,
         names
@@ -488,6 +524,67 @@ app.get('/ap-card-report', checkToken, async (req, res) => {
     res.type('text/plain').send((r.stdout + r.stderr).trim() || 'The card check produced no output.');
 });
 
+// Change the access point's name, passphrase, own channel or time-slicing.
+// Applied by "ap-setup.sh set" in a detached job (the AP restarts, which may
+// drop this page's connection); the same checks run again in the script.
+app.post('/ap-settings', checkToken, async (req, res) => {
+    const cfg = readApConfig();
+    if (!cfg) {
+        return res.status(400).json({ error: 'No access point is installed.' });
+    }
+    const { ssid, passphrase, band, channel, timeSlice } = req.body || {};
+    const args = [AP_SETUP_TOOL, 'set'];
+    if (ssid !== undefined && ssid !== '') {
+        if (!isValidSsid(ssid)) {
+            return res.status(400).json({ error: 'Invalid network name: 1-32 characters, no control characters or leading/trailing spaces.' });
+        }
+        args.push('--ssid', ssid);
+    }
+    let passFile = null;
+    if (passphrase !== undefined && passphrase !== '') {
+        if (typeof passphrase !== 'string' || !/^[\x20-\x7e]{8,63}$/.test(passphrase)) {
+            return res.status(400).json({ error: 'Invalid passphrase: 8-63 printable characters.' });
+        }
+        // handed over in a root-only file, never on a command line
+        passFile = `/run/webrtc-cast-ap-passphrase-${crypto.randomBytes(6).toString('hex')}`;
+        args.push('--passphrase-file', passFile);
+    }
+    if (channel !== undefined && channel !== '') {
+        const ch = Number(channel);
+        const b = band === '5' ? '5' : '2.4';
+        const allowed = { '2.4': [], '5': [] };
+        for (const f of (await apFreqs(cfg)) || []) {
+            const c = freqToChannel(f);
+            if (c !== null) allowed[f < 3000 ? '2.4' : '5'].push(c);
+        }
+        if (!Number.isInteger(ch) || !allowed[b].includes(ch)) {
+            return res.status(400).json({ error: `This card can't run the access point on ${b} GHz channel ${channel}.` });
+        }
+        args.push('--band', b, '--channel', String(ch));
+    }
+    if (timeSlice !== undefined && timeSlice !== null) {
+        const on = timeSlice === true;
+        if (on && !(cfg.MODE === 'shared' && Number(cfg.CHANNELS || 1) >= 2)) {
+            return res.status(400).json({ error: 'Time-slicing needs a shared access point on a card that can use two channels.' });
+        }
+        if (on !== (cfg.TIME_SLICE === '1')) args.push('--time-slice', on ? 'on' : 'off');
+    }
+    if (args.length === 2) {
+        return res.status(400).json({ error: 'Nothing to change.' });
+    }
+    console.log(`Access point settings: ${args.slice(2).join(' ')}`);
+    if (passFile) {
+        const made = await runFile('sudo', ['install', '-m', '600', '/dev/null', passFile]);
+        const written = made.ok && await new Promise(resolve =>
+            sudoWriteFile(passFile, `${passphrase}\n`, error => resolve(!error)));
+        if (!written) {
+            return res.status(500).json({ error: 'Could not hand the new passphrase to the access point setup.' });
+        }
+    }
+    res.json({ ok: true });
+    setTimeout(() => startDetached('ap-settings', args), 1000);
+});
+
 // Station status
 app.get('/station-status', checkToken, async (req, res) => {
     const cfg = readApConfig();
@@ -502,12 +599,19 @@ app.get('/station-status', checkToken, async (req, res) => {
     }
     const saved = (await runFile('sudo', ['cat', stationConfigPath(iface)])).stdout;
     const configuredSsid = ((saved.match(/^\s*wpa-ssid (.*)$/m) || [])[1] || '').trim();
+    const freqList = ((saved.match(/^\s*wpa-freq-list (.*)$/m) || [])[1] || '').trim().split(/\s+/).filter(Boolean).map(Number);
+    let bandLimit = 'any band';
+    if (freqList.length) {
+        bandLimit = freqList.every(f => f < 3000) ? '2.4 GHz only' : 'channels the access point can share';
+    }
     const link = await stationLink(iface);
     res.json({
         available: true,
         iface,
         sharedWithAp: !!(cfg && cfg.MODE === 'shared'),
+        timeSlice: !!(cfg && cfg.TIME_SLICE === '1'),
         configuredSsid,
+        bandLimit: configuredSsid ? bandLimit : '',
         ...link,
         ip: link.connected ? await ipv4Of(iface) : ''
     });
@@ -540,7 +644,7 @@ app.get('/station-scan', checkToken, async (req, res) => {
         if (!best.has(key) || (entry.signal ?? -999) > (best.get(key).signal ?? -999)) best.set(key, entry);
     }
     const networks = [...best.values()].sort((a, b) => (b.signal ?? -999) - (a.signal ?? -999));
-    const allowed = await apShareableFreqs(cfg);
+    const allowed = apKeepsStationShareable(cfg) ? await apFreqs(cfg) : null;
     networks.forEach(net => { net.apShareable = !allowed || allowed.includes(net.freq); });
     res.json({ networks, cached, restricted: !!allowed, error: !r.ok ? 'Scan failed; type the network name instead.' : '' });
 });
@@ -548,6 +652,7 @@ app.get('/station-scan', checkToken, async (req, res) => {
 // Save the station network and connect now
 app.post('/station-connect', checkToken, async (req, res) => {
     const { ssid, psk } = req.body || {};
+    const band = ['auto', 'any', '2.4'].includes((req.body || {}).band) ? req.body.band : 'auto';
     if (!isValidSsid(ssid)) {
         return res.status(400).json({ error: 'Invalid network name: 1-32 characters, no control characters or leading/trailing spaces.' });
     }
@@ -567,10 +672,10 @@ app.post('/station-connect', checkToken, async (req, res) => {
         `    wpa-ssid ${ssid}`,
         `    wpa-psk ${psk}`
     ];
-    const allowed = await apShareableFreqs(cfg);
-    if (allowed) {
-        // keep the station where the shared AP can follow it (one channel, no time-slicing)
-        lines.push(`    wpa-freq-list ${allowed.join(' ')}`);
+    const freqs = await stationFreqList(band, cfg);
+    if (freqs) {
+        // e.g. keep the station where the shared AP can follow it (one channel, no time-slicing)
+        lines.push(`    wpa-freq-list ${freqs.join(' ')}`);
     }
     lines.push('');
     const config = lines.join('\n');

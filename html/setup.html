@@ -67,6 +67,17 @@
         .scan-results button.not-shareable {
             color: #888;
         }
+        .ap-settings {
+            margin: 8px 0;
+        }
+        .ap-settings summary {
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .ap-settings label {
+            display: inline-block;
+            min-width: 7em;
+        }
         .hint {
             color: #666;
             font-size: 0.9em;
@@ -153,6 +164,13 @@
                     <div id="scanResults" class="scan-results"></div><br>
                     <label for="psk">Password:</label>
                     <input type="password" id="psk" name="psk" autocomplete="new-password"><br><br>
+                    <label for="stationBand">Band:</label>
+                    <select id="stationBand">
+                        <option value="auto">Automatic</option>
+                        <option value="any">Any band</option>
+                        <option value="2.4">2.4 GHz only</option>
+                    </select>
+                    <div id="stationBandHint" class="hint"></div><br>
                     <input type="submit" id="connectButton" value="Save &amp; Connect">
                     <button type="button" id="forgetButton" onclick="forgetStation()">Forget</button>
                 </form>
@@ -160,8 +178,29 @@
             <td style="vertical-align: top;">
                 <h2>Access Point</h2>
                 <table id="apStatus" class="wifi-status"><tr><td>Loading...</td></tr></table>
+                <details id="apSettings" class="ap-settings" style="display: none;">
+                    <summary>Change access point settings</summary>
+                    <form id="apSettingsForm">
+                        <label for="apSsid">Network name:</label>
+                        <input type="text" id="apSsid" autocomplete="off"><br>
+                        <label for="apPass">New passphrase:</label>
+                        <input type="password" id="apPass" autocomplete="new-password" placeholder="leave empty to keep"><br>
+                        <label for="apBand">Band:</label>
+                        <select id="apBand" onchange="fillApChannels()"></select>
+                        <label for="apChannel" style="min-width: 0;">Channel:</label>
+                        <select id="apChannel"></select>
+                        <div id="apChannelHint" class="hint"></div>
+                        <div id="apTimeSliceRow" style="display: none;">
+                            <input type="checkbox" id="apTimeSlice">
+                            <label for="apTimeSlice" style="min-width: 0;">Time-slicing: let the station use any band (5 GHz too)</label>
+                            <div class="hint">The radio then switches between two channels. Some cards drop access point
+                                clients this way; see the Card report before turning it on.</div>
+                        </div>
+                        <br><input type="submit" value="Save access point settings">
+                    </form>
+                </details>
                 <button type="button" onclick="showCardReport()">Card report</button>
-                <p class="hint">The access point is set up with contrib/ap-setup.sh.<br>
+                <p class="hint">The access point is installed with contrib/ap-setup.sh.<br>
                 A screenshot of this box and the card report helps with support.</p>
             </td>
         </tr>
@@ -320,6 +359,12 @@
                     rows.push(['Status', 'Not connected']);
                 }
                 rows.push(['Saved network', st.configuredSsid || 'none']);
+                if (st.configuredSsid) rows.push(['Band limit', st.bandLimit]);
+                document.getElementById('stationBandHint').textContent = st.sharedWithAp
+                    ? (st.timeSlice
+                        ? 'Automatic: any band (time-slicing is on).'
+                        : 'Automatic: only channels the access point can share, so they stay on one channel.')
+                    : 'Automatic: any band.';
                 setRows('stationStatus', rows);
                 document.getElementById('forgetButton').disabled = !st.configuredSsid;
             } catch (error) {
@@ -398,7 +443,7 @@
                 await apiJson('/station-connect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ssid, psk })
+                    body: JSON.stringify({ ssid, psk, band: document.getElementById('stationBand').value })
                 });
                 document.getElementById('psk').value = '';
                 setRows('stationStatus', [['Status', `Connecting to "${ssid}"...`]]);
@@ -448,11 +493,108 @@
                 }
                 rows.push(['Client internet', ap.forward ? 'Yes (through the uplink)' : 'No (casting only)']);
                 if (ap.clients !== null) rows.push(['Clients connected', String(ap.clients)]);
+                if (ap.mode === 'shared') rows.push(['Time-slicing', ap.timeSlice ? 'On' : 'Off']);
                 setRows('apStatus', rows);
+                fillApSettings(ap);
             } catch (error) {
                 setRows('apStatus', [['Status', `Could not read the access point status: ${error.message}`]]);
             }
         }
+
+        // ---- Access point settings form ----
+        let apInfo = null;
+
+        function fillApSettings(ap) {
+            apInfo = ap;
+            const details = document.getElementById('apSettings');
+            details.style.display = '';
+            const form = document.getElementById('apSettingsForm');
+            if (form.dataset.filled) return; // don't overwrite while the user edits
+            form.dataset.filled = '1';
+            document.getElementById('apSsid').value = ap.ssid || '';
+            const bandSel = document.getElementById('apBand');
+            bandSel.textContent = '';
+            ['2.4', '5'].forEach(b => {
+                if (!ap.allowedChannels[b].length) return;
+                const o = document.createElement('option');
+                o.value = b;
+                o.textContent = `${b} GHz`;
+                bandSel.appendChild(o);
+            });
+            bandSel.value = ap.allowedChannels[ap.apBand].length ? ap.apBand : '2.4';
+            fillApChannels(ap.apChannel);
+            document.getElementById('apChannelHint').textContent = ap.mode === 'shared'
+                ? "The access point's own channel. It uses the station's channel instead whenever it can."
+                : '';
+            document.getElementById('apTimeSliceRow').style.display = ap.canTimeSlice ? '' : 'none';
+            document.getElementById('apTimeSlice').checked = !!ap.timeSlice;
+        }
+
+        function fillApChannels(selected) {
+            const band = document.getElementById('apBand').value;
+            const chSel = document.getElementById('apChannel');
+            chSel.textContent = '';
+            ((apInfo && apInfo.allowedChannels[band]) || []).forEach(ch => {
+                const o = document.createElement('option');
+                o.value = String(ch);
+                o.textContent = String(ch);
+                chSel.appendChild(o);
+            });
+            if (selected && [...chSel.options].some(o => o.value === String(selected))) {
+                chSel.value = String(selected);
+            }
+        }
+
+        document.getElementById('apSettingsForm').addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!apInfo) return;
+            const body = {};
+            const ssid = document.getElementById('apSsid').value;
+            const pass = document.getElementById('apPass').value;
+            const band = document.getElementById('apBand').value;
+            const channel = document.getElementById('apChannel').value;
+            if (ssid && ssid !== apInfo.ssid) body.ssid = ssid;
+            if (pass) body.passphrase = pass;
+            if (channel && (Number(channel) !== apInfo.apChannel || band !== apInfo.apBand)) {
+                body.band = band;
+                body.channel = channel;
+            }
+            if (apInfo.canTimeSlice) {
+                const ts = document.getElementById('apTimeSlice').checked;
+                if (ts !== apInfo.timeSlice) body.timeSlice = ts;
+            }
+            if (!Object.keys(body).length) {
+                alert('Nothing changed.');
+                return;
+            }
+            const restarts = body.ssid || body.passphrase || body.channel;
+            let warning = 'Save the access point settings?';
+            if (restarts) {
+                warning += '\n\nThe access point restarts and everyone on it is disconnected for a few seconds.';
+                if (body.ssid) warning += `\nIt will be called "${body.ssid}".`;
+                if (body.passphrase) warning += '\nClients must rejoin with the new passphrase.';
+            }
+            if (body.timeSlice !== undefined) {
+                warning += body.timeSlice
+                    ? '\n\nTime-slicing on: the station may use any band the next time it connects (Save & Connect it again).'
+                    : '\n\nTime-slicing off: the station is kept on channels the access point can share the next time it connects (Save & Connect it again).';
+            }
+            if (!confirm(warning)) return;
+            try {
+                await apiJson('/ap-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                document.getElementById('apPass').value = '';
+                document.getElementById('apSettingsForm').dataset.filled = '';
+                setRows('apStatus', [['Status', 'Applying the new settings...']]);
+                setTimeout(loadApStatus, restarts ? 15000 : 3000);
+                setTimeout(loadStationStatus, restarts ? 15000 : 3000);
+            } catch (error) {
+                alert(error.message);
+            }
+        });
 
         async function showCardReport() {
             showModal('Checking the Wi-Fi card...');

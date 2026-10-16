@@ -68,9 +68,15 @@ away. The settings go in `/etc/network/interfaces.d/<card>` (readable by root
 only). With a shared access point (`ap-setup.sh --shared`) the access point
 is off for up to a minute while the station connects, then comes back on the
 channel it picks.
-* Access Point: read-only status of an access point installed with
-`contrib/ap-setup.sh`, plus a Card report button (the `check` output).
-Changes to the access point are made with `ap-setup.sh`.
+* Station WiFi band: Automatic (with a shared access point and time-slicing
+off, only channels the access point can share; otherwise any band), Any band,
+or 2.4 GHz only.
+* Access Point: status of an access point installed with
+`contrib/ap-setup.sh`, a Card report button (the `check` output), and
+settings for its name, passphrase, own band/channel (only channels the card
+allows) and, in shared mode, time-slicing. Saving restarts the access point
+(`ap-setup.sh set` does the same from the command line). Installing,
+removing, the address and client internet stay with `ap-setup.sh`.
 
 ### Display and Scaling Troubleshooting
 Projectors vary a lot, so when someone reports the cast "not scaling right"
@@ -147,12 +153,18 @@ built-in card when the station is wired):
 virtual `ap0`). When hostapd starts, the AP takes the uplink's channel if the
 card allows an AP there; otherwise, on cards that can use two channels, it
 keeps its own 2.4 GHz channel and the radio time-slices between them (which
-drops AP clients on some cards). A timer restarts hostapd when the station
+drops AP clients on some cards). By default the station is kept on channels
+the AP can share; `--time-slice` (or the setup page) lets it use any band, for
+cards tested stable that way. A timer restarts hostapd when the station
 moves to another channel, so the AP follows it. The station's Wi-Fi
-connection is set on the setup page, which keeps it on channels the AP can
-share, or by hand (ifupdown with wpasupplicant):
+connection is set on the setup page (its Automatic band choice follows the
+time-slicing setting), or by hand (ifupdown with wpasupplicant):
 
 `sudo contrib/ap-setup.sh install --iface wlp2s0 --shared --ssid "Room 114 Cast" --passphrase 'secret-pass'`
+
+* Change an installed AP without reinstalling (the setup page uses this too):
+
+`sudo contrib/ap-setup.sh set --channel 11` or `sudo contrib/ap-setup.sh set --time-slice on`
 
 * Remove it again: `sudo contrib/ap-setup.sh uninstall` (add `--purge` to
 also remove the hostapd and dnsmasq packages).
